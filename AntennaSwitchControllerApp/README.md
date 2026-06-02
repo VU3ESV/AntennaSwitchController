@@ -87,6 +87,11 @@ open "dist/Antenna Switch Controller.app"
 
 ## Host inside the Amateur Radio Suite
 
+Verified building and running as the fourth tab ("Antenna Switch") in the
+`AmateurRadioApps` container, alongside LP-700, LP-100A, and Band Pass Filter:
+
+![Suite integration](docs/images/suite-integration.png)
+
 This package exposes the plugin product `AntennaSwitchControllerKit` and the
 adapter `AntennaSwitchPlugin: RadioPlugin`. To add it to the container
 (`AmateurRadioApps`), make the same two edits used for the other plugins:

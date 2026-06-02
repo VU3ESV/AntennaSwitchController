@@ -13,3 +13,6 @@ AntennaSwitchControllerApp/Resources/AppIcon.iconset/
 # Arduino build cache (arduino-cli builds outside the tree by default)
 build/
 *.bin
+
+# local suite-integration workspace (scratch)
+.suite/
