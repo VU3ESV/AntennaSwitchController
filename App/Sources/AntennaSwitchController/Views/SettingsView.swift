@@ -90,6 +90,19 @@ struct SettingsView: View {
                 }
             }
 
+            if vm.config.mode == .dual {
+                Section("Radio 2 (Mode B)") {
+                    Picker("Type", selection: $vm.config.radio2Type) {
+                        ForEach(RadioType.allCases, id: \.self) { Text($0.label).tag($0) }
+                    }
+                    TextField("Host / IP", text: $vm.config.radio2Host)
+                    TextField("Port", value: $vm.config.radio2Port, format: .number.grouping(.never))
+                    Picker("External switch", selection: $vm.config.switchType) {
+                        ForEach(SwitchType.allCases, id: \.self) { Text($0.label).tag($0) }
+                    }
+                }
+            }
+
             Section {
                 HStack {
                     Button { Task { await vm.save() } } label: {

@@ -21,7 +21,23 @@ struct InterlockStatus: Codable, Equatable {
     }
 
     var isStandalone: Bool { role == "standalone" }
+    var isDual: Bool       { role == "dual" }
     var peerIsUp: Bool     { peerUp != 0 }
+}
+
+/// Radio 2 state in Mode B, nested in `/status` as `"radio2"`.
+struct Radio2Status: Codable, Equatable {
+    let tci: Int
+    let freq: Int
+    let band: String
+    let tx: Int
+
+    var tciUp: Bool        { tci != 0 }
+    var transmitting: Bool { tx != 0 }
+    var freqMHz: String {
+        guard freq > 0 else { return "—" }
+        return String(format: "%.3f MHz", Double(freq) / 1_000_000.0)
+    }
 }
 
 struct DeviceStatus: Codable, Equatable {
@@ -37,9 +53,10 @@ struct DeviceStatus: Codable, Equatable {
     let activeRelay: Int     // -1 = none energized, else 0..7
     let switching: Int
     let interlock: InterlockStatus?   // absent on pre-P2b firmware
+    let radio2: Radio2Status?         // present only in Mode B (dual)
 
     enum CodingKeys: String, CodingKey {
-        case ap, wifi, ip, tci, freq, band, tx, tune, switching, interlock
+        case ap, wifi, ip, tci, freq, band, tx, tune, switching, interlock, radio2
         case overrideMode = "override"
         case activeRelay = "active_relay"
     }

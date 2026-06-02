@@ -279,17 +279,21 @@ Same ESP8266 sketch; the mode selects the topology.
 
 ## 9. Phased roadmap
 
-1. **P0 — Refactor, no behaviour change.** `RadioSource` + `OutputStage` + mode
-   plumbing (mode=standalone only); current single-TCI 8×1 preserved.
-2. **P1 — Multi-transport (per board).** `SerialCatSource` (UART0) + Kenwood/Icom/
-   Yaesu, `NetCatSource` (TCP); HARDWARE.md level-converter wiring; app radio
-   source selector.
-3. **P2a — Mode B (single dual-radio + 8×2).** Two RadioSources, in-firmware
-   interlock, `Relay8x2` direct-relay output stage; app Dual UI.
-4. **P2b — Mode A (Master/Slave + 1×2).** `PeerLink` LAN interlock (§6.1), role
-   selector + master association; app SO2R pair view.
-5. **P3 — Polish.** Per-band secondary fallback, first-come interlock option,
-   1-master-N-slaves, optional Antenna Genius/AetherSDR emulator.
+1. ✅ **P0 — Refactor, no behaviour change.** `RadioSource` + `OutputStage`;
+   single-TCI 8×1 preserved. *(done — commit 4f28fe6)*
+2. ◑ **P1 — Multi-transport (per board).** `FlexSource` (FlexRadio SmartSDR TCP)
+   + `radio_type` selector, app radio-source picker. *(done — 5b523e5;
+   build-verified. Serial CAT — `SerialCatSource` Kenwood/Icom/Yaesu + level
+   converters + HARDWARE.md — still TODO.)*
+3. ✅ **P2a — Mode B (single dual-radio + 8×2).** 2nd `RadioSource`, in-firmware
+   `DualResolver`, `Relay8x2` per-antenna A/B (8× SPDT); app Dual UI. *(done;
+   build-verified — no 8×2 switch wired yet.)*
+4. ✅ **P2b — Mode A (Master/Slave + 1×2).** `Interlock.h` LAN arbiter (§6.1),
+   role selector + master association; app interlock view. *(done — a1bd725;
+   **live-validated on two boards**.)*
+5. **P3 — Polish.** Per-band secondary fallback, mDNS master-pick in the app,
+   1-master-N-slaves, serial-CAT (carryover from P1), optional Antenna
+   Genius/AetherSDR emulator.
 
 ---
 

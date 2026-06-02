@@ -13,7 +13,7 @@ public enum SnapshotTool {
         vm.status = DeviceStatus(ap: 0, wifi: 1, ip: "192.168.86.52", tci: 1,
                                  freq: 7_140_000, band: "40m", tx: 0, tune: 0,
                                  overrideMode: -2, activeRelay: 1, switching: 0,
-                                 interlock: nil)
+                                 interlock: nil, radio2: nil)
         vm.identity = DeviceIdentity(device: "AntennaSwitchController", version: "1.0",
                                      hostname: "ANT-SW-Controller-2F",
                                      mdns: "ANT-SW-Controller-2F.local",

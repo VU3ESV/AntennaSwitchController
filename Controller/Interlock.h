@@ -68,6 +68,48 @@ class MasterArbiter {
   uint32_t lastSlaveMs_ = 0;
 };
 
+// ---- Mode B: single-board dual-radio resolver (§6.2) ----------------------
+// One MCU sees both radios, so the interlock is a local decision: if the two
+// radios want the same antenna index, FIRST-COME keeps it with the current
+// holder and denies the newcomer (→ none). Per-radio TX-safety freezes a
+// radio's antenna while it is transmitting/tuning (R2.9).
+class DualResolver {
+ public:
+  void setPolicy(uint8_t policy) { policy_ = policy; }
+
+  // Resolve desired antennas d1 (Radio 1) and d2 (Radio 2), each -1..7, into
+  // granted outputs a1/a2 (guaranteed a1 != a2, or one is -1). tx1/tx2 hold the
+  // respective radio's antenna fixed while it transmits.
+  void resolve(int d1, int d2, bool tx1, bool tx2, int& a1, int& a2) {
+    a1 = tx1 ? cur1_ : d1;        // don't move a radio's antenna under TX
+    a2 = tx2 ? cur2_ : d2;
+
+    if (a1 >= 0 && a1 == a2) {    // both want the same antenna → arbitrate
+      bool r1Holds = (cur1_ == a1);
+      bool r2Holds = (cur2_ == a2);
+      if (policy_ == ILK_PRIORITY) {          // Radio 1 wins
+        a2 = -1;
+      } else if (r1Holds && !r2Holds) {       // first-come: R1 already on it
+        a2 = -1;
+      } else if (r2Holds && !r1Holds) {       // first-come: R2 already on it
+        a1 = -1;
+      } else {                                // neither (or both) held → R1
+        a2 = -1;
+      }
+    }
+    cur1_ = a1;
+    cur2_ = a2;
+  }
+
+  int radio1Ant() const { return cur1_; }
+  int radio2Ant() const { return cur2_; }
+
+ private:
+  uint8_t policy_ = ILK_FIRST_COME;
+  int     cur1_   = -1;
+  int     cur2_   = -1;
+};
+
 // ---- Slave side: the client -----------------------------------------------
 class SlaveClient {
  public:

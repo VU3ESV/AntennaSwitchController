@@ -114,4 +114,32 @@ class Relay8x1 : public OutputStage {
   uint32_t breakStart_ = 0;
 };
 
+// Per-antenna A/B select for Mode B's external 8×2 switch (8× SPDT). Convention
+// (confirmed): relay i de-energized routes antenna i to Radio 1; energized
+// routes it to Radio 2. Radio 1's antenna is therefore implicit (a LOW line),
+// so at most ONE relay is energized at a time — Radio 2's antenna. That is
+// exactly the Relay8x1 invariant, so we drive Radio 2's line through a Relay8x1
+// (same break-before-make + TX-inhibit) and just remember Radio 1's antenna for
+// status. The DualResolver guarantees a1 != a2.
+class Relay8x2 {
+ public:
+  void begin(uint16_t guardMs) { r_.begin(guardMs); a1_ = -1; }
+  void beginSafe()             { r_.beginSafe();     a1_ = -1; }
+  void setGuardMs(uint16_t ms) { r_.setGuardMs(ms); }
+  void setInhibit(bool tx)     { r_.setInhibit(tx); }
+
+  // a1 → Radio 1 (implicit LOW), a2 → Radio 2 (the energized line). -1 = none.
+  void setDual(int a1, int a2) { a1_ = a1; r_.setDesired(a2); }
+  void tick()                  { r_.tick(); }
+
+  int  radio1Ant() const { return a1_; }              // intended R1 antenna
+  int  radio2Ant() const { return r_.activeRelay(); } // energized = R2 antenna
+  bool switching() const { return r_.switching(); }
+  void allOff()          { r_.allOff(); }
+
+ private:
+  Relay8x1 r_;
+  int      a1_ = -1;
+};
+
 #endif // OUTPUTSTAGE_H
