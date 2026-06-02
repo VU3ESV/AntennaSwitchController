@@ -4,12 +4,14 @@ import SwiftUI
 /// toolbar actions (open web portal, reboot). Owns the polling view model.
 struct ControllerDetailView: View {
     let controller: Controller
+    @EnvironmentObject private var store: ControllersStore
     @StateObject private var vm: ControllerViewModel
     @State private var confirmReboot = false
 
     init(controller: Controller) {
         self.controller = controller
-        _vm = StateObject(wrappedValue: ControllerViewModel(host: controller.address))
+        _vm = StateObject(wrappedValue: ControllerViewModel(host: controller.address,
+                                                            name: controller.name))
     }
 
     var body: some View {
@@ -35,7 +37,7 @@ struct ControllerDetailView: View {
             Button("Reboot", role: .destructive) { Task { await vm.reboot() } }
             Button("Cancel", role: .cancel) {}
         }
-        .onAppear { vm.start() }
+        .onAppear { vm.hostBridge = store.host; vm.start() }
         .onDisappear { vm.stop() }
     }
 }

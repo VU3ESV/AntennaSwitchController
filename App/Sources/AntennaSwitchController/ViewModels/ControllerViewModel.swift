@@ -6,6 +6,7 @@ import AppKit
 @MainActor
 final class ControllerViewModel: ObservableObject {
     let host: String
+    let displayName: String
 
     @Published var status: DeviceStatus?
     @Published var identity: DeviceIdentity?
@@ -16,10 +17,17 @@ final class ControllerViewModel: ObservableObject {
     @Published var isSaving = false
     @Published var saveResult: String?
 
+    /// Set by the detail view from the store; routes events to the suite host.
+    weak var hostBridge: PluginHostBridge?
+
     private var pollTask: Task<Void, Never>?
+    private var reportedOffline = false      // so we only notify on real transitions
     private var client: AntennaSwitchClient { AntennaSwitchClient(host: host) }
 
-    init(host: String) { self.host = host }
+    init(host: String, name: String? = nil) {
+        self.host = host
+        self.displayName = (name?.isEmpty == false ? name! : host)
+    }
 
     // MARK: - Polling lifecycle
 
@@ -44,10 +52,19 @@ final class ControllerViewModel: ObservableObject {
             status = s
             connected = true
             errorMessage = nil
+            if reportedOffline {            // recovered from a reported outage
+                reportedOffline = false
+                hostBridge?.controllerCameOnline(name: displayName)
+            }
             if identity == nil { identity = try? await client.fetchDiscover() }
         } catch {
             connected = false
             errorMessage = message(error)
+            // Report the outage once, not on every failed poll.
+            if !reportedOffline {
+                reportedOffline = true
+                hostBridge?.controllerWentOffline(name: displayName, address: host)
+            }
         }
     }
 
@@ -79,8 +96,10 @@ final class ControllerViewModel: ObservableObject {
             config.wifiPassword = ""   // one-shot; firmware kept it if blank
             config.otaPassword = ""
             saveResult = "Saved. Device applies settings (reconnects TCI)."
+            hostBridge?.configSaved(name: displayName, ok: true, detail: nil)
         } catch {
             saveResult = message(error)
+            hostBridge?.configSaved(name: displayName, ok: false, detail: message(error))
         }
     }
 

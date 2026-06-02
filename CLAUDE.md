@@ -255,6 +255,19 @@ Controllers. Mirrors the conventions of `VU3ESV/BandPassFilterControllerApp`.
 - `NSLocalNetworkUsageDescription` + `NSBonjourServices` in `Resources/Info.plist`
   are required for LAN/Bonjour access on macOS.
 
+## RadioPluginKit 1.2 contract
+`AntennaSwitchPlugin` implements the full 1.2 contract:
+- **`manifest`** (`RadioPluginManifest`): id `antsw`, isolation `.inProcess`,
+  capabilities `[.networkClient, .bonjour, .notifications]`; `metadata` derives
+  from it.
+- **`persistState`/`restoreState`**: saves/restores the selected controller id so
+  a relaunch reopens it (`ControllersStore.restore(selection:)`).
+- **Host context**: connectivity/save events reach the host's `report` (typed
+  `PluginError`), `notify` (`PluginNotification`), and `setBadge` surfaces. View
+  models stay RadioPluginKit-agnostic via the module-local `PluginHostBridge`
+  protocol (`PluginBridge.swift`); the plugin implements it and forwards to the
+  injected `PluginHost`. Standalone leaves the bridge nil (views show inline state).
+
 ## Build quirk
 Global git `safe.bareRepository=explicit` blocks SwiftPM from reading fetched
 checkouts. Prefix builds with

@@ -10,10 +10,14 @@ final class ControllersStore: ObservableObject {
     @Published private(set) var discovered: [DiscoveredDevice] = []
     @Published private(set) var isBrowsing = false
 
+    /// Set by the plugin adapter to route VM events to the suite host; nil standalone.
+    weak var host: PluginHostBridge?
+
     private let discovery = DiscoveryService()
     private var bag = Set<AnyCancellable>()
     private let defaultsKey = "controllers"
     private var started = false
+    private var restoredSelection: Controller.ID?
 
     init() {
         discovery.$devices.receive(on: RunLoop.main)
@@ -27,8 +31,17 @@ final class ControllersStore: ObservableObject {
         started = true
         load()
         discovery.start()
-        if selection == nil { selection = controllers.first?.id }
+        // Prefer a restored selection (from the host's state restoration), else
+        // fall back to the first saved controller.
+        if let r = restoredSelection, controllers.contains(where: { $0.id == r }) {
+            selection = r
+        } else if selection == nil {
+            selection = controllers.first?.id
+        }
     }
+
+    /// Stash a selection to apply on `start()` (RadioPlugin.restoreState).
+    func restore(selection id: Controller.ID) { restoredSelection = id }
 
     func rescan() { discovery.restart() }
 
