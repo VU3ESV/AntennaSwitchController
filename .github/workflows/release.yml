@@ -90,19 +90,16 @@ jobs:
           brew list xcodegen >/dev/null 2>&1 || brew install xcodegen
           ./scripts/make-radioplugin.sh        # -> App/dist/AntennaSwitch.radioplugin
 
-      - name: Package (zip preserving the bundle)
-        working-directory: App/dist
-        run: |
-          ditto -c -k --sequesterRsrc --keepParent \
-            "Antenna Switch Controller.app" \
-            "Antenna-Switch-Controller-macOS.zip"
+      - name: Package app as .dmg
+        working-directory: App
+        run: ./scripts/make-dmg.sh        # -> App/dist/Antenna-Switch-Controller-macOS.dmg
 
       - uses: actions/upload-artifact@v4
         with:
           name: macos-app
-          # the app zip + the plugin (an ADDITIONAL artifact alongside the app)
+          # the app .dmg + the plugin (an ADDITIONAL artifact alongside the app)
           path: |
-            App/dist/Antenna-Switch-Controller-macOS.zip
+            App/dist/Antenna-Switch-Controller-macOS.dmg
             App/dist/AntennaSwitch.radioplugin
           if-no-files-found: error
 
@@ -156,19 +153,19 @@ jobs:
           generate_release_notes: true
           fail_on_unmatched_files: true
           files: |
-            artifacts/macos-app/Antenna-Switch-Controller-macOS.zip
+            artifacts/macos-app/Antenna-Switch-Controller-macOS.dmg
             artifacts/macos-app/AntennaSwitch.radioplugin
             artifacts/firmware/AntennaSwitchController-firmware.bin
           body: |
             **Antenna Switch Controller** release — macOS app + ESP8266 firmware + Suite plugin.
 
-            ## macOS app (`Antenna-Switch-Controller-macOS.zip`)
+            ## macOS app (`Antenna-Switch-Controller-macOS.dmg`)
             Universal binary (Apple Silicon + Intel).
 
             > ⚠️ **Unsigned & not notarized.** macOS Gatekeeper will block it on
             > another Mac until you clear the quarantine flag.
 
-            1. Unzip and move **Antenna Switch Controller.app** to `/Applications`.
+            1. Open the DMG and drag **Antenna Switch Controller.app** to `/Applications`.
             2. Clear the quarantine attribute (one time):
                ```bash
                xattr -dr com.apple.quarantine "/Applications/Antenna Switch Controller.app"
