@@ -17,7 +17,10 @@ BUNDLE="$DIST/$APP_NAME.app"
 # about to publish (VERSION=0.1.3); a local build falls back to `git describe`
 # so the About box still shows something meaningful.
 if [ -z "${VERSION:-}" ]; then
-  VERSION="$(git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//')"
+  # `|| true` keeps a tagless checkout (e.g. CI's shallow clone) from tripping
+  # `set -e`/`pipefail` when git describe exits non-zero.
+  VERSION="$(git describe --tags --abbrev=0 2>/dev/null || true)"
+  VERSION="${VERSION#v}"
   VERSION="${VERSION:-0.0.0-dev}"
 fi
 
