@@ -182,7 +182,7 @@ the external switch's wiring.
     "master_address": "ANT-SW-Controller-1F.local",  // REQUIRED when mode == slave
     "slave_address":  ""           // master may learn this from the slave's claims
   },
-  "interlock": { "priority": "radio1", "policy": "priority", "on_peer_loss": "safe" },
+  "interlock": { "priority": "radio1", "policy": "first_come", "on_peer_loss": "safe" },
   "radios": [                      // 1 entry (standalone/master/slave) or 2 (dual)
     { /* RadioSource — TCI / TCP / serial; see §2 */ },
     { /* 2nd radio — dual mode only; obeys the one-serial rule */ }
@@ -227,13 +227,15 @@ threaded, so the master serializes peer requests and its own loop — no locking
 
 ### 6.2 Mode B (single board, in firmware)
 One MCU sees both radios, so interlock is a local decision each control tick:
-compute desired antenna for Radio 1 and Radio 2; if they collide, the priority
-radio keeps it and the other takes `secondary[]` → none; then emit both via the
-OutputStage. Per-radio TX-safety and break-before-make still apply.
+compute desired antenna for Radio 1 and Radio 2; if they collide, the
+**current holder keeps it** (first-come) and the other takes `secondary[]` →
+none; then emit both via the OutputStage. Per-radio TX-safety and
+break-before-make still apply.
 
-Priority is configurable (`interlock.priority`, default **radio1**); a
-**first-come / current-holder-keeps-it** policy is offered as an alternative
-(`policy`).
+**CONFIRMED policy: first-come / current-holder-keeps-it** (`policy =
+first_come`, the default) — the radio already on the contended antenna is not
+kicked off mid-QSO; the newcomer falls back. A strict `priority` policy
+(`interlock.priority = radio1`) remains available as an alternative.
 
 ---
 
@@ -293,15 +295,17 @@ Same ESP8266 sketch; the mode selects the topology.
 
 ## 10. Open questions (confirm before P2)
 
-1. **Mode B 8×2 control lines** — confirm the 8 relays wire directly and each line
-   selects **one antenna → Radio 1 or Radio 2** (per-antenna A/B, 8× SPDT). If
-   instead a line means something else (e.g. a 1×2 enable + a separate 1-of-8),
-   tell me the exact relay→function table so the `Relay8x2` map matches the switch.
+1. ~~**Mode B 8×2 control lines**~~ **CONFIRMED:** the 8 relays wire directly and
+   each line selects **one antenna → Radio 1 or Radio 2** (per-antenna A/B,
+   **8× SPDT**). `Relay8x2` drives relay _i_ = antenna _i_: de-energized routes
+   antenna _i_ to Radio 1, energized routes it to Radio 2 (interlock guarantees
+   the two radios never resolve to the same antenna).
 2. **Mode A 1×2 switches** — confirm a per-band/per-antenna 1×2 switch for
    isolation, and how it's wired/driven (passive, or driven by the same relay
    index on each board).
-3. **Interlock priority/policy** — default **Radio 1 priority**; offer **first-
-   come** to avoid kicking Radio 2 off mid-QSO?
+3. ~~**Interlock priority/policy**~~ **CONFIRMED: first-come / current-holder-
+   keeps-it** is the default (§6.2) — never kick a radio off the antenna it is
+   already using; the newcomer falls back to `secondary[]` → none.
 4. **On peer loss (Mode A)** — slave → **safe/none** (proposed) vs. hold-last.
 5. **Per-radio vs shared antenna map.**
 6. **CAT families first** (Icom CI-V / Kenwood / Yaesu) and whether FlexRadio
