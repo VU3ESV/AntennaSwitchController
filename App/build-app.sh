@@ -14,15 +14,19 @@ DIST="dist"
 BUNDLE="$DIST/$APP_NAME.app"
 
 # Universal builds (both Apple Silicon and Intel) for distributable releases.
+# NB: empty-array expansion must be `${a[@]+"${a[@]}"}` to stay safe under
+# `set -u` on macOS's bash 3.2 (a bare "${a[@]}" errors when the array is empty).
 ARCH_FLAGS=()
 if [ "${UNIVERSAL:-0}" = "1" ]; then
   ARCH_FLAGS=(--arch arm64 --arch x86_64)
+  echo "▶ Building universal release binary (arm64 + x86_64)…"
+else
+  echo "▶ Building release binary (host arch)…"
 fi
 
-echo "▶ Building release binary… ${ARCH_FLAGS[*]:-(host arch)}"
-swift build -c release "${ARCH_FLAGS[@]}"
+swift build -c release ${ARCH_FLAGS[@]+"${ARCH_FLAGS[@]}"}
 
-BIN_PATH="$(swift build -c release "${ARCH_FLAGS[@]}" --show-bin-path)/$BINARY"
+BIN_PATH="$(swift build -c release ${ARCH_FLAGS[@]+"${ARCH_FLAGS[@]}"} --show-bin-path)/$BINARY"
 
 echo "▶ Assembling app bundle…"
 rm -rf "$BUNDLE"
