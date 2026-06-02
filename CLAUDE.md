@@ -125,9 +125,9 @@ at power-up, and SHOULD prefer GPIO14/12/13/4/5 for the most-used bands.
   | `/relay`   | POST   | Manual override: `set=auto\|none\|0..7`          |
   | `/discover`| GET    | Device identity + mDNS metadata + firmware version |
   | `/reboot`  | POST   | Soft reboot                                      |
-  | `/interlock`| GET   | SO2R Mode A: `{role, peer_up, master_ant, slave_ant}` |
-  | `/interlock/claim`  | POST | SO2R: slave claims antenna `ant=i` → `1`/`0` (master only) |
-  | `/interlock/release`| POST | SO2R: slave releases its hold (master only)  |
+  | `/interlock`| GET   | SO2R Mode A: `{role, peer_up, beats_missed, master_ant, slave_ant}` |
+  | `/interlock/claim`  | POST | SO2R: slave claims antenna `ant=i` → `1`/`0`; doubles as the heartbeat (master only) |
+  | `/interlock/release`| POST | SO2R: slave releases its hold / idle heartbeat (master only) |
 
 - **R3.2** The band→relay assignment UI SHALL present each supported band with a
   dropdown of relays 1–8 plus "none/bypass", and SHALL show the live current
@@ -200,7 +200,7 @@ RadioSource.h      abstract "band + TX" source (poll-based)
 TciSource.h        RadioSource over the bundled TCI client (RX-1 VFO A)
 FlexSource.h       RadioSource over FlexRadio SmartSDR (TCP 4992); P1, build-verified
 OutputStage.h      relay map; Relay8x1 (8×1 break-before-make) + Relay8x2 (8×2 A/B)
-Interlock.h        SO2R MasterArbiter + SlaveClient (Mode A) + DualResolver (Mode B)
+Interlock.h        SO2R MasterArbiter + SlaveClient (Mode A, debounced heartbeat) + DualResolver (Mode B)
 WebPortal.h        HTTP routes + HTML config page (+ /config, /discover)
 TCI.h TCI.cpp      bundled IW7DMH TCI v1.0.1, ESP8266-ported (see R2.1)
 RTX.h RTX.cpp      bundled IW7DMH RTX state (band edges, VFO/TRX/tune getters)
@@ -217,7 +217,10 @@ RTX.h RTX.cpp      bundled IW7DMH RTX state (band edges, VFO/TRX/tune getters)
 > v2→v3 EEPROM migration, `Interlock.h` (master `MasterArbiter` + slave
 > `SlaveClient`), the `/interlock*` HTTP API, and app UI (role picker +
 > dashboard interlock badge). First-come / current-holder-keeps-it interlock,
-> **live-validated on two boards**. **P2a** added **Mode B** (`mode=dual`): one
+> with a **debounced bidirectional heartbeat** (slave claim/release every 2 s;
+> loss declared after 3 consecutive missed beats / 6 s, so one dropped packet
+> never drops an antenna; `beats_missed` in `/status`). **live-validated on two
+> boards** (including heartbeat failover + recovery). **P2a** added **Mode B** (`mode=dual`): one
 > board tracks both radios (a second `RadioSource`) and drives an external **8×2**
 > switch via `Relay8x2` (per-antenna A/B, 8× SPDT) with an in-firmware
 > `DualResolver` (same first-come policy, per-radio TX-safety). Config v3→v4

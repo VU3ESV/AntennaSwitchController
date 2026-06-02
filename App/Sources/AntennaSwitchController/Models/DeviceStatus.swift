@@ -8,14 +8,16 @@ import Foundation
 /// SO2R interlock state, nested in `/status` as `"interlock"`.
 /// `{"role":"master","peer_up":1,"master_ant":1,"slave_ant":2}`
 struct InterlockStatus: Codable, Equatable {
-    let role: String         // "standalone" | "master" | "slave"
+    let role: String         // "standalone" | "master" | "slave" | "dual"
     let peerUp: Int
+    let beatsMissed: Int?    // consecutive missed heartbeats (Mode A; nil = older fw)
     let masterAnt: Int       // antenna held by the master radio, -1 = none
     let slaveAnt: Int        // antenna held by the slave radio, -1 = none
 
     enum CodingKeys: String, CodingKey {
         case role
         case peerUp = "peer_up"
+        case beatsMissed = "beats_missed"
         case masterAnt = "master_ant"
         case slaveAnt = "slave_ant"
     }

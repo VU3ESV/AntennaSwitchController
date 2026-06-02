@@ -109,9 +109,12 @@ String interlockJson() {
     j += ",\"master_ant\":" + String(g_dual.radio1Ant());   // Radio 1
     j += ",\"slave_ant\":"  + String(g_dual.radio2Ant());   // Radio 2
   } else {
-    bool up = g_cfg.mode == MODE_MASTER ? g_master.peerUp()
-            : g_cfg.mode == MODE_SLAVE  ? g_slave.peerUp() : false;
+    bool up   = g_cfg.mode == MODE_MASTER ? g_master.peerUp()
+              : g_cfg.mode == MODE_SLAVE  ? g_slave.peerUp() : false;
+    int missed = g_cfg.mode == MODE_MASTER ? g_master.beatsMissed()
+               : g_cfg.mode == MODE_SLAVE  ? g_slave.missedBeats() : 0;
     j += "\",\"peer_up\":" + String(up ? 1 : 0);
+    j += ",\"beats_missed\":" + String(missed);   // heartbeat health
     j += ",\"master_ant\":" + String(g_master.masterAnt());
     j += ",\"slave_ant\":"  + String(g_master.slaveAnt());
   }
