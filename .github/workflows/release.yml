@@ -31,6 +31,49 @@ env:
   GIT_CONFIG_VALUE_0: all
 
 jobs:
+  # Resolve the release version up front so the macOS app can be stamped with it
+  # at build time. The app and publish jobs both consume these outputs, so the
+  # bundle's CFBundleShortVersionString always matches the published tag.
+  version:
+    name: Resolve version + tag
+    if: github.event_name != 'pull_request' || github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+      value: ${{ steps.tag.outputs.value }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0      # full tags for auto-bump
+
+      - name: Resolve tag
+        id: tag
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG="${{ github.event.inputs.tag }}"
+          elif [ "${{ github.event_name }}" = "push" ]; then
+            TAG="${{ github.ref_name }}"
+          else
+            # PR merged into main — auto-bump the latest clean semver tag (patch).
+            git fetch --tags --force --quiet
+            LATEST="$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -n1)"
+            if [ -z "$LATEST" ]; then
+              TAG="v0.1.0"
+            else
+              IFS=. read -r MA MI PA <<< "${LATEST#v}"
+              TAG="v${MA}.${MI}.$((PA + 1))"
+            fi
+            while git rev-parse "refs/tags/$TAG" >/dev/null 2>&1; do
+              IFS=. read -r MA MI PA <<< "${TAG#v}"
+              TAG="v${MA}.${MI}.$((PA + 1))"
+            done
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "value=${TAG#v}" >> "$GITHUB_OUTPUT"
+          echo "Releasing $TAG"
+
   firmware:
     name: Build ESP8266 firmware
     # Only on a real merge (or tag/dispatch) — a closed-but-unmerged PR must not release.
@@ -67,6 +110,7 @@ jobs:
 
   app:
     name: Build macOS app (universal) + plugin
+    needs: version
     if: github.event_name != 'pull_request' || github.event.pull_request.merged == true
     runs-on: macos-14
     steps:
@@ -76,6 +120,7 @@ jobs:
         working-directory: App
         env:
           UNIVERSAL: "1"
+          VERSION: ${{ needs.version.outputs.value }}
         run: ./build-app.sh
 
       - name: Verify universal binary
@@ -105,50 +150,19 @@ jobs:
 
   publish:
     name: Publish GitHub Release
-    needs: [ firmware, app ]
+    needs: [ version, firmware, app ]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: main
-          fetch-depth: 0      # full tags for auto-bump
-
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
 
-      - name: Resolve tag
-        id: tag
-        run: |
-          set -euo pipefail
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            TAG="${{ github.event.inputs.tag }}"
-          elif [ "${{ github.event_name }}" = "push" ]; then
-            TAG="${{ github.ref_name }}"
-          else
-            # PR merged into main — auto-bump the latest clean semver tag (patch).
-            git fetch --tags --force --quiet
-            LATEST="$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -n1)"
-            if [ -z "$LATEST" ]; then
-              TAG="v0.1.0"
-            else
-              IFS=. read -r MA MI PA <<< "${LATEST#v}"
-              TAG="v${MA}.${MI}.$((PA + 1))"
-            fi
-            while git rev-parse "refs/tags/$TAG" >/dev/null 2>&1; do
-              IFS=. read -r MA MI PA <<< "${TAG#v}"
-              TAG="v${MA}.${MI}.$((PA + 1))"
-            done
-          fi
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          echo "Releasing $TAG"
-
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.tag.outputs.tag }}
-          name: ${{ steps.tag.outputs.tag }}
+          tag_name: ${{ needs.version.outputs.tag }}
+          name: ${{ needs.version.outputs.tag }}
           target_commitish: main
           generate_release_notes: true
           fail_on_unmatched_files: true
