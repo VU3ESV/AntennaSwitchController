@@ -3,10 +3,13 @@
 [![CI](https://github.com/VU3ESV/AntennaSwitchController/actions/workflows/ci.yml/badge.svg)](https://github.com/VU3ESV/AntennaSwitchController/actions/workflows/ci.yml)
 [![Release](https://github.com/VU3ESV/AntennaSwitchController/actions/workflows/release.yml/badge.svg)](https://github.com/VU3ESV/AntennaSwitchController/actions/workflows/release.yml)
 
-A TCI-driven **antenna switch** for amateur radio: an ESP8266 controller that
-listens to the radio's TCI server, reads the active band, and switches the
-matching antenna relay automatically — plus a **macOS app** to manage multiple
-controllers from one window.
+A band-following **antenna switch** for amateur radio: an ESP8266 controller that
+tracks the radio's active band (over **TCI** or **FlexRadio SmartSDR**) and
+switches the matching antenna relay automatically — with full **SO2R** support
+(two radios) — plus a **macOS app** to manage multiple controllers from one
+window.
+
+See the [CHANGELOG](CHANGELOG.md) for what's new in each release.
 
 <p align="center">
   <img src="App/docs/images/app-icon.png" width="120" alt="App icon">
@@ -25,23 +28,29 @@ See [CLAUDE.md](CLAUDE.md) for the full requirements/architecture spec.
 
 ## The Controller (firmware)
 
-Runs on the ESP8266 ESP-12F 8-channel relay board. It connects to the radio's
-**TCI** server (using IW7DMH's TCI library, bundled and ported to ESP8266),
-derives the band from RX-1 VFO A, and energizes the mapped antenna relay with
-exclusive **break-before-make** switching — never two antennas at once, and
-never switching while transmitting. A web portal maps each band to a relay;
-firmware updates go **over-the-air**.
+Runs on the ESP8266 ESP-12F 8-channel relay board. It tracks the radio's active
+band, then energizes the mapped antenna relay with exclusive **break-before-make**
+switching — never two antennas at once, and never switching while transmitting.
+A web portal maps each band to a relay; firmware updates go **over-the-air**.
 
 <p align="center">
   <img src="App/docs/images/relay-board.jpg" width="460" alt="ESP8266 ESP-12F 8-channel relay board">
 </p>
 
 **Highlights**
-- TCI client (ExpertSDR3 / SunSDR2 PRO / TCI-compliant), single radio, RX-1 VFO A.
+- **Multi-transport band source** — **TCI** (ExpertSDR3 / SunSDR2 PRO / any
+  TCI-compliant, via the bundled IW7DMH library ported to ESP8266) or
+  **FlexRadio SmartSDR** (network CAT over TCP 4992). Selectable per unit.
+- **SO2R (two radios)** in two topologies — *Mode A* master/slave (two boards,
+  LAN interlock) and *Mode B* single board driving an external **8×2** switch.
+  See [Multi-radio & SO2R](#multi-radio--so2r) below.
+- **Multi-receiver radios** — a SunSDR2 with two receivers (RX1/RX2) drives SO2R
+  from **one** board (both radios on one TCI link, RX1 + RX2).
 - 11 bands (160 m–6 m incl. 60 m); each band → one of 8 relays or none/bypass.
 - Exclusive, break-before-make switching (~50 ms guard); deferred during TX/tune.
-- Failsafe: all relays de-energized on boot / WiFi loss / TCI loss / unmapped band.
-- Web config portal, EEPROM + CRC32 persistence, mDNS, SoftAP first-run setup.
+- Failsafe: all relays de-energized on boot / WiFi loss / radio loss / unmapped band.
+- Web config portal, EEPROM + CRC32 persistence (with versioned migration), mDNS,
+  SoftAP first-run setup.
 - ArduinoOTA updates; `_antsw._tcp` Bonjour service + `/config` JSON for the app.
 
 ### Build & flash
@@ -70,6 +79,64 @@ your LAN as `ANT-SW-Controller-xx.local`.
 
 ---
 
+## Multi-radio & SO2R
+
+Each unit runs in one of four **modes** (set in the web portal or the app). The
+full design is in [docs/MULTI-RADIO-SO2R-PLAN.md](docs/MULTI-RADIO-SO2R-PLAN.md).
+
+| Mode | Radios | Switch | What it does |
+|------|--------|--------|--------------|
+| **Standalone** | 1 | 8×1 | Today's single-radio band → relay (default). |
+| **Master** | 1 (Radio 1) | 8×1 | Mode A arbiter; coordinates a slave over the LAN. |
+| **Slave** | 1 (Radio 2) | 8×1 | Mode A; claims antennas from its master. |
+| **Dual** | 2 | 8×2 | Mode B; one board tracks both radios, drives an 8×2 switch. |
+
+**Interlock (both SO2R modes):** an antenna in use by one radio is never given to
+the other. Policy is **first-come / current-holder-keeps-it** (the radio already
+on a contended antenna keeps it; the other falls back) — a transmitting radio's
+antenna is also held fixed (no hot-switching).
+
+### Mode A — Master / Slave (two boards, best isolation)
+Two standard 8×1 boards, one radio each, plus per-band 1×2 switches for RF
+isolation. They coordinate over the LAN with a **debounced heartbeat** (claim
+every 2 s; loss declared only after 3 missed beats / 6 s, so one dropped packet
+never drops an antenna). On master loss the slave fails safe (or holds).
+
+```
+  Radio 1 ── MASTER 8×1 ──┐
+                          ├──► per-antenna 1×2 ──► antenna i   (only one radio at a time)
+  Radio 2 ── SLAVE  8×1 ──┘   coordinated over the LAN (interlock + heartbeat)
+```
+
+### Mode B — single board + external 8×2 switch
+**One** board tracks **both** radios and drives an external **8×2** switch. The 8
+relays wire straight to the switch: **relay _i_ = antenna _i_**, and the relay for
+**each** radio's antenna is energized — so up to **two** relays are HIGH at once
+(one per radio), the switch routing each to its radio. The in-firmware interlock
+keeps the two distinct.
+
+```
+  Radio 1 ─┐
+           ├─► ONE board (2 sources, interlock in firmware) ─► external 8×2 switch ─► 8 antennas
+  Radio 2 ─┘
+```
+
+### One SunSDR2 with two receivers → SO2R from one board
+A radio that exposes **two receivers** over TCI (e.g. SunSDR2 PRO) is driven as
+Mode B from a single board: point **both** radios at the **same** TCI host/port,
+set **Radio 1 = RX1** and **Radio 2 = RX2**, and pick the **8×2** switch.
+
+| Setting | Radio 1 | Radio 2 |
+|---|---|---|
+| Type / Host / Port | TCI · `<SunSDR IP>` · `50001` | TCI · **same IP** · **same port** |
+| Receiver | **RX1** | **RX2** |
+| External switch | — | **8×2** |
+
+Each receiver follows its own band → antenna; the interlock guarantees they never
+land on the same antenna.
+
+---
+
 ## The App (macOS)
 
 Manage **multiple** controllers on your network — add by IP/hostname or pick them
@@ -85,8 +152,10 @@ status (here: controller `2F` connected, on 40 m / 7.140 MHz, relay R2, Auto/TCI
 
 ![App controls](App/docs/images/app-controls.png)
 
-**Settings** — every web-page option: WiFi, TCI host/port + IARU region, the full
-band→relay map, hostname, OTA password, break-before-make guard:
+**Settings** — every web-page option: WiFi, radio type (TCI / FlexRadio) + host/port
++ receiver (RX1/RX2) + IARU region, the full band→relay map, the **SO2R role**
+(Standalone / Master / Slave / Dual) with interlock policy and — for Dual — the
+second radio + 8×2 switch, plus hostname, OTA password, break-before-make guard:
 
 ![App settings](App/docs/images/app-settings.png)
 
@@ -127,7 +196,7 @@ copy it to another Mac, Gatekeeper quarantines it and refuses to open it
 ("…is damaged" / "cannot be opened"). Clear the quarantine flag once:
 
 ```bash
-# 1. Unzip and move the app to /Applications, then:
+# 1. Open the .dmg and drag the app to /Applications, then:
 xattr -dr com.apple.quarantine "/Applications/Antenna Switch Controller.app"
 # 2. Open it (first launch can also be done via right-click → Open):
 open "/Applications/Antenna Switch Controller.app"
@@ -144,13 +213,16 @@ it Gatekeeper blocks an unsigned, un-notarized bundle. On first launch, allow
   app (debug + release `.app`) on every push/PR, and compiles the ESP8266 firmware
   with `arduino-cli`.
 - **Release** ([`.github/workflows/release.yml`](.github/workflows/release.yml))
-  triggers on a `v*` tag: it builds the **universal `.app`** *and* compiles the
-  **ESP8266 firmware (`.bin`)**, then publishes a GitHub Release with both
-  assets + install/flash instructions. Cut one with:
-  ```bash
-  git tag v1.0.0 && git push origin v1.0.0
-  ```
-  Each release attaches `Antenna-Switch-Controller-macOS.zip` (the app) and
+  builds the **universal `.app`** (packaged as a **`.dmg`**), the suite
+  **`.radioplugin`**, *and* the **ESP8266 firmware (`.bin`)**, then publishes a
+  GitHub Release with all three + install/flash instructions. It triggers three
+  ways:
+  - **PR merged into `main`** → auto-bumps the latest `vX.Y.Z` tag (patch) and releases;
+  - pushing a **`vX.Y.Z` tag** → releases that tag;
+  - **manual dispatch** with a tag.
+
+  Each release attaches `Antenna-Switch-Controller-macOS.dmg` (the app),
+  `AntennaSwitch.radioplugin` (the suite plugin), and
   `AntennaSwitchController-firmware.bin` (flash via OTA `espota.py` or USB).
 
 ### Host inside the Amateur Radio Suite
@@ -209,10 +281,12 @@ collides with other plugins.
 | Route | Method | Used for |
 |-------|--------|----------|
 | `/discover` | GET | identity (device, firmware version, relays) |
-| `/status`   | GET | live state (band, active relay, TCI/WiFi/TX…) |
-| `/config`   | GET | stored settings → Settings form (no passwords) |
+| `/status`   | GET | live state (band, active relay, TCI/WiFi/TX, interlock, radio 2…) |
+| `/config`   | GET | stored settings → Settings form (radio type/receiver, mode/peer/interlock, radio 2, switch type… no passwords) |
 | `/save`     | POST (form) | persist settings |
 | `/relay?set=auto\|none\|0..7` | POST | manual override |
+| `/interlock` | GET | SO2R Mode A interlock state (`role, peer_up, beats_missed, master_ant, slave_ant`) |
+| `/interlock/claim?ant=i` · `/interlock/release` | POST | SO2R: slave claim/release (master side); also the heartbeat |
 | `/reboot`   | POST | soft reboot |
 
 Discovery is via the firmware's `_antsw._tcp` Bonjour service (TXT: version,
