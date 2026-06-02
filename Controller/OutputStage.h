@@ -114,32 +114,76 @@ class Relay8x1 : public OutputStage {
   uint32_t breakStart_ = 0;
 };
 
-// Per-antenna A/B select for Mode B's external 8×2 switch (8× SPDT). Convention
-// (confirmed): relay i de-energized routes antenna i to Radio 1; energized
-// routes it to Radio 2. Radio 1's antenna is therefore implicit (a LOW line),
-// so at most ONE relay is energized at a time — Radio 2's antenna. That is
-// exactly the Relay8x1 invariant, so we drive Radio 2's line through a Relay8x1
-// (same break-before-make + TX-inhibit) and just remember Radio 1's antenna for
-// status. The DualResolver guarantees a1 != a2.
+// External 8×2 switch driver (confirmed wiring): relay i = antenna i, and the
+// relay for EACH receiver's antenna is energized — so up to TWO relays are HIGH
+// at once (one per receiver), the switch routing each energized antenna to its
+// radio. The DualResolver guarantees a1 != a2, so the two are always distinct.
+//
+// Break-before-make is per-line: when a receiver moves to a new antenna, its
+// OLD relay drops, then after the guard delay its NEW relay makes — while the
+// other receiver's (unchanged) relay stays energized throughout, so it is never
+// momentarily disconnected.
 class Relay8x2 {
  public:
-  void begin(uint16_t guardMs) { r_.begin(guardMs); a1_ = -1; }
-  void beginSafe()             { r_.beginSafe();     a1_ = -1; }
-  void setGuardMs(uint16_t ms) { r_.setGuardMs(ms); }
-  void setInhibit(bool tx)     { r_.setInhibit(tx); }
+  void begin(uint16_t guardMs) { guard_ms_ = guardMs; beginSafe(); }
 
-  // a1 → Radio 1 (implicit LOW), a2 → Radio 2 (the energized line). -1 = none.
-  void setDual(int a1, int a2) { a1_ = a1; r_.setDesired(a2); }
-  void tick()                  { r_.tick(); }
+  void beginSafe() {
+    for (int i = 0; i < NUM_RELAYS; i++) { pinMode(kRelayPin[i], OUTPUT); digitalWrite(kRelayPin[i], LOW); }
+    a1_ = a2_ = -1;
+    curMask_ = targetMask_ = 0;
+    phase_ = IDLE;
+  }
 
-  int  radio1Ant() const { return a1_; }              // intended R1 antenna
-  int  radio2Ant() const { return r_.activeRelay(); } // energized = R2 antenna
-  bool switching() const { return r_.switching(); }
-  void allOff()          { r_.allOff(); }
+  void setGuardMs(uint16_t ms) { guard_ms_ = ms; }
+  void setInhibit(bool tx)     { inhibit_ = tx; }
+
+  // a1 → Radio 1's antenna, a2 → Radio 2's antenna (each -1 = none).
+  void setDual(int a1, int a2) { a1_ = a1; a2_ = a2; }
+
+  void tick() {
+    int want = 0;
+    if (a1_ >= 0) want |= (1 << a1_);
+    if (a2_ >= 0) want |= (1 << a2_);
+
+    if (phase_ == BREAKING) {
+      if ((uint32_t)(millis() - breakStart_) >= guard_ms_) {
+        applyMask(targetMask_);          // make: energize the arriving relays
+        curMask_ = targetMask_;
+        phase_ = IDLE;
+      }
+      return;
+    }
+    if (inhibit_) return;
+
+    if (want != curMask_) {
+      int keep = curMask_ & want;        // relays common to old + new stay on
+      applyMask(keep);                   // break: drop the leaving relays now
+      curMask_   = keep;
+      targetMask_= want;
+      breakStart_= millis();
+      phase_     = BREAKING;             // make after the guard delay
+    }
+  }
+
+  int  radio1Ant() const { return a1_; }
+  int  radio2Ant() const { return a2_; }
+  int  energizedMask() const { return curMask_; }   // bitmask of HIGH relays
+  bool switching() const { return phase_ != IDLE; }
+  void allOff()          { applyMask(0); curMask_ = 0; }
 
  private:
-  Relay8x1 r_;
-  int      a1_ = -1;
+  void applyMask(int mask) {
+    for (int i = 0; i < NUM_RELAYS; i++)
+      digitalWrite(kRelayPin[i], (mask >> i) & 1 ? HIGH : LOW);
+  }
+
+  enum Phase { IDLE, BREAKING };
+  int      a1_ = -1, a2_ = -1;
+  int      curMask_ = 0, targetMask_ = 0;
+  Phase    phase_ = IDLE;
+  bool     inhibit_ = false;
+  uint16_t guard_ms_ = 50;
+  uint32_t breakStart_ = 0;
 };
 
 #endif // OUTPUTSTAGE_H

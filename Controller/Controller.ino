@@ -142,6 +142,7 @@ String statusJson() {
   j += "\"active_relay\":" + String(activeRelay) + ",";           // -1 = none
   j += "\"switching\":"    + String(sw ? 1 : 0) + ",";
   if (g_cfg.mode == MODE_DUAL) {
+    j += "\"relay_mask\":" + String(g_dual.energizedMask()) + ",";  // bits of HIGH relays
     j += "\"radio2\":{\"tci\":"  + String(g_radio2->connected() ? 1 : 0);
     j += ",\"freq\":"            + String(g_radio2->freqHz());
     j += ",\"band\":\""          + String(bandName(g_radio2->band())) + "\"";

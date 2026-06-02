@@ -199,7 +199,7 @@ Config.h           EEPROM settings struct + CRC32 load/save, defaults, MAC hostn
 RadioSource.h      abstract "band + TX" source (poll-based)
 TciSource.h        RadioSource over the bundled TCI client; setRig() picks RX1/RX2
 FlexSource.h       RadioSource over FlexRadio SmartSDR (TCP 4992); P1, build-verified
-OutputStage.h      relay map; Relay8x1 (8×1 break-before-make) + Relay8x2 (8×2 A/B)
+OutputStage.h      relay map; Relay8x1 (8×1 break-before-make) + Relay8x2 (8×2: relay i=antenna i, one HIGH per radio)
 Interlock.h        SO2R MasterArbiter + SlaveClient (Mode A, debounced heartbeat) + DualResolver (Mode B)
 WebPortal.h        HTTP routes + HTML config page (+ /config, /discover)
 TCI.h TCI.cpp      bundled IW7DMH TCI v1.0.1, ESP8266-ported (see R2.1)
@@ -221,12 +221,14 @@ RTX.h RTX.cpp      bundled IW7DMH RTX state (band edges, VFO/TRX/tune getters)
 > loss declared after 3 consecutive missed beats / 6 s, so one dropped packet
 > never drops an antenna; `beats_missed` in `/status`). **live-validated on two
 > boards** (including heartbeat failover + recovery). **P2a** added **Mode B** (`mode=dual`): one
-> board tracks both radios (a second `RadioSource`) and drives an external **8×2**
-> switch via `Relay8x2` (per-antenna A/B, 8× SPDT) with an in-firmware
-> `DualResolver` (same first-come policy, per-radio TX-safety). Config v3→v4
-> (radio 2 + `switch_type`); app gains a Radio 2 settings section + dual
-> dashboard. Mode B is **build-verified** (no 8×2 switch wired yet); the v3→v4
-> migration is hardware-validated and leaves Mode A boards unchanged.
+> board tracks both radios and drives an external **8×2** switch via `Relay8x2`
+> (relay _i_ = antenna _i_; the relay for **each** receiver's antenna is energized,
+> so up to **two** relays HIGH at once — interlock keeps them distinct) with an
+> in-firmware `DualResolver` (first-come policy, per-radio TX-safety). A
+> **per-radio TCI receiver index** (`radio_rx`/`radio2_rx`) drives a 2-receiver
+> radio (SunSDR2) as SO2R from one board (both radios → same host/port, RX1/RX2).
+> Config grew through v5; app gains Radio 2 + receiver pickers + dual dashboard.
+> **Live-validated on a SunSDR2 + the 8×2 wiring.**
 
 ## 6. Confirmed decisions
 
