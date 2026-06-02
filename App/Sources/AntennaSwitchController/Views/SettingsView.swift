@@ -31,13 +31,20 @@ struct SettingsView: View {
                 SecureField("Password (blank = keep)", text: $vm.config.wifiPassword)
             }
 
-            Section("TCI Server") {
+            Section("Radio") {
+                Picker("Type", selection: radioTypeBinding) {
+                    ForEach(RadioType.allCases, id: \.self) { type in
+                        Text(type.label).tag(type)
+                    }
+                }
                 TextField("Host / IP", text: $vm.config.tciHost)
                 TextField("Port", value: $vm.config.tciPort, format: .number.grouping(.never))
-                Picker("IARU Region", selection: $vm.config.region) {
-                    Text("1").tag(1); Text("2").tag(2); Text("3").tag(3)
+                if vm.config.radioType == .tci {
+                    Picker("IARU Region", selection: $vm.config.region) {
+                        Text("1").tag(1); Text("2").tag(2); Text("3").tag(3)
+                    }
+                    .pickerStyle(.segmented)
                 }
-                .pickerStyle(.segmented)
             }
 
             Section("Band → Relay Map") {
@@ -64,6 +71,25 @@ struct SettingsView: View {
                 }
             }
 
+            Section("SO2R Role (Mode A)") {
+                Picker("Role", selection: $vm.config.mode) {
+                    ForEach(CtrlMode.allCases, id: \.self) { Text($0.label).tag($0) }
+                }
+                if vm.config.mode == .slave {
+                    TextField("Master address (IP)", text: $vm.config.peerHost)
+                }
+                if vm.config.mode != .standalone {
+                    Picker("Interlock policy", selection: $vm.config.interlockPolicy) {
+                        ForEach(InterlockPolicy.allCases, id: \.self) { Text($0.label).tag($0) }
+                    }
+                }
+                if vm.config.mode == .slave {
+                    Picker("On master loss", selection: $vm.config.onPeerLoss) {
+                        ForEach(PeerLoss.allCases, id: \.self) { Text($0.label).tag($0) }
+                    }
+                }
+            }
+
             Section {
                 HStack {
                     Button { Task { await vm.save() } } label: {
@@ -84,6 +110,20 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
+    }
+
+    /// Binding for the radio type. Switching transports retunes the port to the
+    /// new transport's conventional default, but only if the current port is
+    /// still the old transport's default (so a custom port is never clobbered).
+    private var radioTypeBinding: Binding<RadioType> {
+        Binding(
+            get: { vm.config.radioType },
+            set: { newType in
+                let old = vm.config.radioType
+                if vm.config.tciPort == old.defaultPort { vm.config.tciPort = newType.defaultPort }
+                vm.config.radioType = newType
+            }
+        )
     }
 
     /// Two-way binding into the `bands` array element for one band index.

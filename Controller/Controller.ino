@@ -16,42 +16,72 @@
 
 #include "Config.h"
 #include "BandPlan.h"
-#include "AntennaSwitch.h"
+#include "OutputStage.h"
+#include "RadioSource.h"
+#include "TciSource.h"
+#include "FlexSource.h"
+#include "Interlock.h"
 #include "WebPortal.h"
-#include "TCI.h"
 
 #define STATUS_LED   2          // onboard blue LED (active-LOW), GPIO2
 #define AP_SSID      "ANT-SW-Setup"
 
-Config        g_cfg;
-AntennaSwitch g_sw;
-WebPortal     g_web;
-TCI           g_radio;
+Config     g_cfg;
+Relay8x1   g_out;               // 8×1 exclusive break-before-make output stage
+WebPortal  g_web;
+
+// Concrete radio sources; g_radio points at the one selected by cfg.radio_type.
+TciSource    g_tci;             // TCI (RX-1 VFO A)
+FlexSource   g_flex;            // FlexRadio SmartSDR (TCP 4992)
+RadioSource* g_radio = &g_tci;
+
+// SO2R Mode A interlock (used only when cfg.mode is master/slave).
+MasterArbiter g_master;         // master: the LAN arbiter
+SlaveClient   g_slave;          // slave: claims antennas from the master
 
 bool     g_apMode   = false;
-int      g_override = -2;       // -2 auto (TCI), -1 force none, 0..7 force relay
-int      g_curBand  = -1;       // last band resolved from TCI VFO
-uint32_t g_lastFreq = 0;        // last RX VFO frequency (Hz)
-bool     g_tx       = false;
-bool     g_tune     = false;
+int      g_override = -2;       // -2 auto, -1 force none, 0..7 force relay
 
-// ---- TCI event handlers (single radio: rig 0 / VFO A only) ----------------
-void onVfo(const int rig, const int vfo) {
-  if (rig != 0 || vfo != 0) return;
-  long hz = g_radio.rtx[rig].getVfo(vfo);
-  if (hz <= 0) return;
-  g_lastFreq = (uint32_t)hz;
-  g_curBand  = freqToBand(g_lastFreq);
+// Point g_radio at the configured transport, (re)connect it. Disconnects the
+// previously-selected source first so /save can switch transports cleanly.
+void applyRadio() {
+  g_radio->disconnect();
+  g_radio = (g_cfg.radio_type == RADIO_FLEX) ? (RadioSource*)&g_flex
+                                             : (RadioSource*)&g_tci;
+  g_radio->configure(g_cfg.tci_host, g_cfg.tci_port, g_cfg.iaru_region);
+  if (strlen(g_cfg.tci_host)) g_radio->connect();
 }
-void onTrx(const int rig) {
-  if (rig != 0) return;
-  g_tx = g_radio.rtx[rig].getTrx();
-  g_sw.setInhibit(g_tx || g_tune);     // R2.9: no hot-switching
+
+// Apply SO2R interlock config (master policy / slave peer + failsafe).
+void applyInterlock() {
+  g_master.setPolicy(g_cfg.interlock_policy);
+  g_slave.configure(g_cfg.peer_host, g_cfg.on_peer_loss);
 }
-void onTune(const int rig) {
-  if (rig != 0) return;
-  g_tune = g_radio.rtx[rig].getTune();
-  g_sw.setInhibit(g_tx || g_tune);
+
+// Resolve the local desired antenna through the active mode's interlock.
+int interlockResolve(int localDesired) {
+  switch (g_cfg.mode) {
+    case MODE_MASTER: g_master.tick(); return g_master.resolveMaster(localDesired);
+    case MODE_SLAVE:  return g_slave.resolve(localDesired);
+    default:          return localDesired;   // standalone (and unhandled dual)
+  }
+}
+
+// ---- interlock HTTP callbacks (master side) --------------------------------
+int  onClaim(int ant)  { return (g_cfg.mode == MODE_MASTER) ? g_master.claim(ant) : 0; }
+void onRelease()       { if (g_cfg.mode == MODE_MASTER) g_master.release(); }
+String interlockJson() {
+  const char* role = g_cfg.mode == MODE_MASTER ? "master"
+                   : g_cfg.mode == MODE_SLAVE  ? "slave" : "standalone";
+  bool up = g_cfg.mode == MODE_MASTER ? g_master.peerUp()
+          : g_cfg.mode == MODE_SLAVE  ? g_slave.peerUp() : false;
+  String j = "{\"role\":\"";
+  j += role;
+  j += "\",\"peer_up\":" + String(up ? 1 : 0);
+  j += ",\"master_ant\":" + String(g_master.masterAnt());
+  j += ",\"slave_ant\":"  + String(g_master.slaveAnt());
+  j += "}";
+  return j;
 }
 
 // ---- web portal callbacks --------------------------------------------------
@@ -60,27 +90,23 @@ String statusJson() {
   j += "\"ap\":"           + String(g_apMode ? 1 : 0) + ",";
   j += "\"wifi\":"         + String(WiFi.status() == WL_CONNECTED ? 1 : 0) + ",";
   j += "\"ip\":\""         + (g_apMode ? WiFi.softAPIP() : WiFi.localIP()).toString() + "\",";
-  j += "\"tci\":"          + String(g_radio.connected() ? 1 : 0) + ",";
-  j += "\"freq\":"         + String(g_lastFreq) + ",";
-  j += "\"band\":\""       + String(bandName(g_curBand)) + "\",";
-  j += "\"tx\":"           + String(g_tx ? 1 : 0) + ",";
-  j += "\"tune\":"         + String(g_tune ? 1 : 0) + ",";
+  j += "\"tci\":"          + String(g_radio->connected() ? 1 : 0) + ",";
+  j += "\"freq\":"         + String(g_radio->freqHz()) + ",";
+  j += "\"band\":\""       + String(bandName(g_radio->band())) + "\",";
+  j += "\"tx\":"           + String(g_radio->isTx() ? 1 : 0) + ",";
+  j += "\"tune\":"         + String(g_radio->isTune() ? 1 : 0) + ",";
   j += "\"override\":"     + String(g_override) + ",";
-  j += "\"active_relay\":" + String(g_sw.activeRelay()) + ",";   // -1 = none
-  j += "\"switching\":"    + String(g_sw.switching() ? 1 : 0);
+  j += "\"active_relay\":" + String(g_out.activeRelay()) + ",";   // -1 = none
+  j += "\"switching\":"    + String(g_out.switching() ? 1 : 0) + ",";
+  j += "\"interlock\":"    + interlockJson();
   j += "}";
   return j;
 }
 
 void onSave() {
-  g_sw.setGuardMs(g_cfg.guard_ms);
-  if (!g_apMode) {
-    g_radio.disconnect();
-    g_radio.set_host(g_cfg.tci_host);
-    g_radio.set_port(g_cfg.tci_port);
-    g_radio.set_iaru_region(g_cfg.iaru_region);
-    if (strlen(g_cfg.tci_host)) g_radio.connect();
-  }
+  g_out.setGuardMs(g_cfg.guard_ms);
+  applyInterlock();                 // master policy / slave peer + failsafe
+  if (!g_apMode) applyRadio();      // may switch transport (TCI <-> Flex)
 }
 void onOverride(int mode) { g_override = mode; }
 void onReboot()           { delay(200); ESP.restart(); }
@@ -106,10 +132,10 @@ void setupOTA() {
   ArduinoOTA.setHostname(g_cfg.hostname);
   if (strlen(g_cfg.ota_pass)) ArduinoOTA.setPassword(g_cfg.ota_pass);
   ArduinoOTA.onStart([]() {
-    // R4.3: safe state + drop TCI so the WS client can't fight the updater.
-    g_sw.setInhibit(true);
-    g_sw.beginSafe();
-    g_radio.disconnect();
+    // R4.3: safe state + drop the radio link so it can't fight the updater.
+    g_out.setInhibit(true);
+    g_out.beginSafe();
+    g_radio->disconnect();
   });
   ArduinoOTA.begin();
 }
@@ -144,7 +170,7 @@ void setup() {
   // 1. Relays to the safe (de-energized) state FIRST, before WiFi/TCI, to
   //    cover the GPIO0/15/16 boot glitch (CLAUDE.md R1 / R2.10).
   bool valid = configLoad(g_cfg);
-  g_sw.begin(g_cfg.guard_ms);
+  g_out.begin(g_cfg.guard_ms);
   pinMode(STATUS_LED, OUTPUT);
   digitalWrite(STATUS_LED, HIGH);   // LED off (active-LOW)
   Serial.printf("config %s, hostname=%s\n", valid ? "loaded" : "defaulted", g_cfg.hostname);
@@ -163,20 +189,16 @@ void setup() {
     }
     setupOTA();
 
-    g_radio.set_host(g_cfg.tci_host);
-    g_radio.set_port(g_cfg.tci_port);
-    g_radio.set_iaru_region(g_cfg.iaru_region);
-    g_radio.attach_vfo_event(onVfo);
-    g_radio.attach_trx_event(onTrx);
-    g_radio.attach_tune_event(onTune);
-    if (strlen(g_cfg.tci_host)) g_radio.connect();
+    applyRadio();                      // select TCI/Flex by cfg.radio_type
   } else {
     startAP();
     Serial.printf("setup AP '%s' at http://%s/\n", AP_SSID, WiFi.softAPIP().toString().c_str());
   }
 
-  // 3. Web portal.
-  g_web.begin(g_cfg, statusJson, onSave, onOverride, onReboot);
+  // 3. SO2R interlock + web portal.
+  applyInterlock();
+  g_web.begin(g_cfg, statusJson, onSave, onOverride, onReboot,
+              onClaim, onRelease, interlockJson);
   Serial.println(F("ready"));
 }
 
@@ -188,22 +210,30 @@ void loop() {
     MDNS.update();
     ArduinoOTA.handle();
     if (WiFi.status() == WL_CONNECTED) {
-      g_radio.process();                 // pump TCI WebSocket + parse one frame
-      link = g_radio.connected();
+      g_radio->process();                // pump transport + refresh state
+      link = g_radio->connected();
     }
   }
 
-  // Decide what should be connected (R2.7 mapping, R2.10 failsafe).
-  int desired;
+  // R2.9: no hot-switching while the radio is transmitting/tuning.
+  g_out.setInhibit(g_radio->isTx() || g_radio->isTune());
+
+  // Decide what this unit wants (R2.7 mapping, R2.10 failsafe).
+  int band = g_radio->band();
+  int localDesired;
   if (g_override != -2) {
-    desired = (g_override == -1) ? -1 : g_override;   // manual override (R2.11)
-  } else if (!link || g_curBand < 0) {
-    desired = -1;                                     // failsafe: all off
+    localDesired = (g_override == -1) ? -1 : g_override;  // manual override (R2.11)
+  } else if (!link || band < 0) {
+    localDesired = -1;                                    // failsafe: all off
   } else {
-    desired = g_cfg.band_relay[g_curBand];            // may be -1 (none)
+    localDesired = g_cfg.band_relay[band];                // may be -1 (none)
   }
-  g_sw.setDesired(desired);
-  g_sw.tick();                                        // break-before-make
+
+  // SO2R Mode A: arbitrate against the peer so the two radios never share an
+  // antenna index (standalone passes through unchanged).
+  int desired = interlockResolve(localDesired);
+  g_out.setDesired(desired);
+  g_out.tick();                                       // break-before-make
 
   digitalWrite(STATUS_LED, link ? LOW : HIGH);        // LED on = TCI linked
   handleSerial();
