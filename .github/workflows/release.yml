@@ -1,0 +1,77 @@
+name: Release
+
+on:
+  push:
+    tags: [ 'v*' ]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to release (e.g. v1.0.0). Must already exist or will be created on the current commit."
+        required: true
+
+permissions:
+  contents: write
+
+env:
+  GIT_CONFIG_COUNT: "1"
+  GIT_CONFIG_KEY_0: safe.bareRepository
+  GIT_CONFIG_VALUE_0: all
+
+jobs:
+  release:
+    name: Build & publish macOS app
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build universal release .app
+        working-directory: App
+        env:
+          UNIVERSAL: "1"
+        run: ./build-app.sh
+
+      - name: Verify universal binary
+        working-directory: App
+        run: lipo -archs "dist/Antenna Switch Controller.app/Contents/MacOS/AntennaSwitchController"
+
+      - name: Package (zip preserving the bundle)
+        working-directory: App/dist
+        run: |
+          ditto -c -k --sequesterRsrc --keepParent \
+            "Antenna Switch Controller.app" \
+            "Antenna-Switch-Controller-macOS.zip"
+
+      - name: Resolve tag
+        id: tag
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "tag=${{ github.event.inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: ${{ steps.tag.outputs.tag }}
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: App/dist/Antenna-Switch-Controller-macOS.zip
+          body: |
+            **Antenna Switch Controller** — macOS app (universal: Apple Silicon + Intel).
+
+            > ⚠️ **Unsigned & not notarized.** This build has no Apple Developer ID,
+            > so macOS Gatekeeper will block it on another Mac until you clear the
+            > quarantine flag.
+
+            ## Install
+            1. Unzip and move **Antenna Switch Controller.app** to `/Applications`.
+            2. Clear the quarantine attribute (one time):
+               ```bash
+               xattr -dr com.apple.quarantine "/Applications/Antenna Switch Controller.app"
+               ```
+            3. Launch it. First time, you can also right-click the app → **Open**.
+
+            On first launch, allow **Local Network** access so the app can discover
+            (`_antsw._tcp`) and reach your controllers.

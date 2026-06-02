@@ -1,0 +1,65 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+  workflow_dispatch:
+
+# Ensure SwiftPM can read fetched checkouts regardless of any machine-level
+# `safe.bareRepository` hardening (added on top of the runner's git config).
+env:
+  GIT_CONFIG_COUNT: "1"
+  GIT_CONFIG_KEY_0: safe.bareRepository
+  GIT_CONFIG_VALUE_0: all
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  app:
+    name: macOS app
+    runs-on: macos-14
+    defaults:
+      run:
+        working-directory: App
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain
+        run: swift --version
+
+      - name: Build (debug)
+        run: swift build
+
+      - name: Build release .app bundle
+        run: ./build-app.sh
+
+      - name: Upload app bundle (non-canonical; release is the real artifact)
+        uses: actions/upload-artifact@v4
+        with:
+          name: AntennaSwitchController-app-ci
+          path: App/dist/Antenna Switch Controller.app
+          if-no-files-found: error
+
+  firmware:
+    name: ESP8266 firmware
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: arduino/setup-arduino-cli@v2
+
+      - name: Install ESP8266 core + WebSockets
+        run: |
+          arduino-cli core update-index
+          arduino-cli core install esp8266:esp8266
+          arduino-cli lib install WebSockets
+
+      - name: Compile Controller sketch
+        run: |
+          arduino-cli compile \
+            --fqbn esp8266:esp8266:generic:eesz=4M1M \
+            --warnings default \
+            Controller

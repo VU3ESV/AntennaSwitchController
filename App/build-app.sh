@@ -1,7 +1,8 @@
 #!/bin/bash
 # Build "Antenna Switch Controller.app" — a double-clickable macOS bundle.
 #
-#   ./build-app.sh            # release build into ./dist
+#   ./build-app.sh              # release build for the host arch into ./dist
+#   UNIVERSAL=1 ./build-app.sh  # universal (arm64 + x86_64) — used by CI/release
 #   open "dist/Antenna Switch Controller.app"
 set -euo pipefail
 
@@ -12,10 +13,16 @@ BINARY="AntennaSwitchController"
 DIST="dist"
 BUNDLE="$DIST/$APP_NAME.app"
 
-echo "▶ Building release binary…"
-swift build -c release
+# Universal builds (both Apple Silicon and Intel) for distributable releases.
+ARCH_FLAGS=()
+if [ "${UNIVERSAL:-0}" = "1" ]; then
+  ARCH_FLAGS=(--arch arm64 --arch x86_64)
+fi
 
-BIN_PATH="$(swift build -c release --show-bin-path)/$BINARY"
+echo "▶ Building release binary… ${ARCH_FLAGS[*]:-(host arch)}"
+swift build -c release "${ARCH_FLAGS[@]}"
+
+BIN_PATH="$(swift build -c release "${ARCH_FLAGS[@]}" --show-bin-path)/$BINARY"
 
 echo "▶ Assembling app bundle…"
 rm -rf "$BUNDLE"

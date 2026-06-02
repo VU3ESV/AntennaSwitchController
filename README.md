@@ -1,5 +1,8 @@
 # Antenna Switch Controller
 
+[![CI](https://github.com/VU3ESV/AntennaSwitchController/actions/workflows/ci.yml/badge.svg)](https://github.com/VU3ESV/AntennaSwitchController/actions/workflows/ci.yml)
+[![Release](https://github.com/VU3ESV/AntennaSwitchController/actions/workflows/release.yml/badge.svg)](https://github.com/VU3ESV/AntennaSwitchController/actions/workflows/release.yml)
+
 A TCI-driven **antenna switch** for amateur radio: an ESP8266 controller that
 listens to the radio's TCI server, reads the active band, and switches the
 matching antenna relay automatically — plus a **macOS app** to manage multiple
@@ -113,6 +116,39 @@ open "dist/Antenna Switch Controller.app"
 > If your global git sets `safe.bareRepository=explicit`, prefix builds with
 > `GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.bareRepository GIT_CONFIG_VALUE_0=all`
 > so SwiftPM can read the fetched RadioPluginKit checkout.
+
+### Install a release build (unsigned app)
+
+Prebuilt **universal** (Apple Silicon + Intel) `.app` bundles are attached to each
+[GitHub Release](https://github.com/VU3ESV/AntennaSwitchController/releases).
+
+The app is **not code-signed or notarized** (no Apple Developer ID), so when you
+copy it to another Mac, Gatekeeper quarantines it and refuses to open it
+("…is damaged" / "cannot be opened"). Clear the quarantine flag once:
+
+```bash
+# 1. Unzip and move the app to /Applications, then:
+xattr -dr com.apple.quarantine "/Applications/Antenna Switch Controller.app"
+# 2. Open it (first launch can also be done via right-click → Open):
+open "/Applications/Antenna Switch Controller.app"
+```
+
+`xattr -dr com.apple.quarantine …` recursively removes the
+`com.apple.quarantine` extended attribute macOS adds to downloaded files; without
+it Gatekeeper blocks an unsigned, un-notarized bundle. On first launch, allow
+**Local Network** access so discovery and controller communication work.
+
+### Releases & CI
+
+- **CI** ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) builds the macOS
+  app (debug + release `.app`) on every push/PR, and compiles the ESP8266 firmware
+  with `arduino-cli`.
+- **Release** ([`.github/workflows/release.yml`](.github/workflows/release.yml))
+  triggers on a `v*` tag: it builds the universal `.app`, zips it with `ditto`,
+  and publishes a GitHub Release with the zip + install instructions. Cut one with:
+  ```bash
+  git tag v1.0.0 && git push origin v1.0.0
+  ```
 
 ### Host inside the Amateur Radio Suite
 
