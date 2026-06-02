@@ -13,7 +13,7 @@
 #include <ESP8266WebServer.h>
 #include "Config.h"
 #include "BandPlan.h"
-#include "AntennaSwitch.h"
+#include "OutputStage.h"
 
 #ifndef FW_VERSION
 #define FW_VERSION "1.0"

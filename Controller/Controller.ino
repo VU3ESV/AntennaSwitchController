@@ -16,43 +16,21 @@
 
 #include "Config.h"
 #include "BandPlan.h"
-#include "AntennaSwitch.h"
+#include "OutputStage.h"
+#include "RadioSource.h"
+#include "TciSource.h"
 #include "WebPortal.h"
-#include "TCI.h"
 
 #define STATUS_LED   2          // onboard blue LED (active-LOW), GPIO2
 #define AP_SSID      "ANT-SW-Setup"
 
-Config        g_cfg;
-AntennaSwitch g_sw;
-WebPortal     g_web;
-TCI           g_radio;
+Config     g_cfg;
+Relay8x1   g_out;               // 8×1 exclusive break-before-make output stage
+WebPortal  g_web;
+TciSource  g_radio;             // single TCI radio (RX-1 VFO A)
 
 bool     g_apMode   = false;
 int      g_override = -2;       // -2 auto (TCI), -1 force none, 0..7 force relay
-int      g_curBand  = -1;       // last band resolved from TCI VFO
-uint32_t g_lastFreq = 0;        // last RX VFO frequency (Hz)
-bool     g_tx       = false;
-bool     g_tune     = false;
-
-// ---- TCI event handlers (single radio: rig 0 / VFO A only) ----------------
-void onVfo(const int rig, const int vfo) {
-  if (rig != 0 || vfo != 0) return;
-  long hz = g_radio.rtx[rig].getVfo(vfo);
-  if (hz <= 0) return;
-  g_lastFreq = (uint32_t)hz;
-  g_curBand  = freqToBand(g_lastFreq);
-}
-void onTrx(const int rig) {
-  if (rig != 0) return;
-  g_tx = g_radio.rtx[rig].getTrx();
-  g_sw.setInhibit(g_tx || g_tune);     // R2.9: no hot-switching
-}
-void onTune(const int rig) {
-  if (rig != 0) return;
-  g_tune = g_radio.rtx[rig].getTune();
-  g_sw.setInhibit(g_tx || g_tune);
-}
 
 // ---- web portal callbacks --------------------------------------------------
 String statusJson() {
@@ -61,24 +39,22 @@ String statusJson() {
   j += "\"wifi\":"         + String(WiFi.status() == WL_CONNECTED ? 1 : 0) + ",";
   j += "\"ip\":\""         + (g_apMode ? WiFi.softAPIP() : WiFi.localIP()).toString() + "\",";
   j += "\"tci\":"          + String(g_radio.connected() ? 1 : 0) + ",";
-  j += "\"freq\":"         + String(g_lastFreq) + ",";
-  j += "\"band\":\""       + String(bandName(g_curBand)) + "\",";
-  j += "\"tx\":"           + String(g_tx ? 1 : 0) + ",";
-  j += "\"tune\":"         + String(g_tune ? 1 : 0) + ",";
+  j += "\"freq\":"         + String(g_radio.freqHz()) + ",";
+  j += "\"band\":\""       + String(bandName(g_radio.band())) + "\",";
+  j += "\"tx\":"           + String(g_radio.isTx() ? 1 : 0) + ",";
+  j += "\"tune\":"         + String(g_radio.isTune() ? 1 : 0) + ",";
   j += "\"override\":"     + String(g_override) + ",";
-  j += "\"active_relay\":" + String(g_sw.activeRelay()) + ",";   // -1 = none
-  j += "\"switching\":"    + String(g_sw.switching() ? 1 : 0);
+  j += "\"active_relay\":" + String(g_out.activeRelay()) + ",";   // -1 = none
+  j += "\"switching\":"    + String(g_out.switching() ? 1 : 0);
   j += "}";
   return j;
 }
 
 void onSave() {
-  g_sw.setGuardMs(g_cfg.guard_ms);
+  g_out.setGuardMs(g_cfg.guard_ms);
   if (!g_apMode) {
     g_radio.disconnect();
-    g_radio.set_host(g_cfg.tci_host);
-    g_radio.set_port(g_cfg.tci_port);
-    g_radio.set_iaru_region(g_cfg.iaru_region);
+    g_radio.configure(g_cfg.tci_host, g_cfg.tci_port, g_cfg.iaru_region);
     if (strlen(g_cfg.tci_host)) g_radio.connect();
   }
 }
@@ -107,8 +83,8 @@ void setupOTA() {
   if (strlen(g_cfg.ota_pass)) ArduinoOTA.setPassword(g_cfg.ota_pass);
   ArduinoOTA.onStart([]() {
     // R4.3: safe state + drop TCI so the WS client can't fight the updater.
-    g_sw.setInhibit(true);
-    g_sw.beginSafe();
+    g_out.setInhibit(true);
+    g_out.beginSafe();
     g_radio.disconnect();
   });
   ArduinoOTA.begin();
@@ -144,7 +120,7 @@ void setup() {
   // 1. Relays to the safe (de-energized) state FIRST, before WiFi/TCI, to
   //    cover the GPIO0/15/16 boot glitch (CLAUDE.md R1 / R2.10).
   bool valid = configLoad(g_cfg);
-  g_sw.begin(g_cfg.guard_ms);
+  g_out.begin(g_cfg.guard_ms);
   pinMode(STATUS_LED, OUTPUT);
   digitalWrite(STATUS_LED, HIGH);   // LED off (active-LOW)
   Serial.printf("config %s, hostname=%s\n", valid ? "loaded" : "defaulted", g_cfg.hostname);
@@ -163,12 +139,7 @@ void setup() {
     }
     setupOTA();
 
-    g_radio.set_host(g_cfg.tci_host);
-    g_radio.set_port(g_cfg.tci_port);
-    g_radio.set_iaru_region(g_cfg.iaru_region);
-    g_radio.attach_vfo_event(onVfo);
-    g_radio.attach_trx_event(onTrx);
-    g_radio.attach_tune_event(onTune);
+    g_radio.configure(g_cfg.tci_host, g_cfg.tci_port, g_cfg.iaru_region);
     if (strlen(g_cfg.tci_host)) g_radio.connect();
   } else {
     startAP();
@@ -188,22 +159,26 @@ void loop() {
     MDNS.update();
     ArduinoOTA.handle();
     if (WiFi.status() == WL_CONNECTED) {
-      g_radio.process();                 // pump TCI WebSocket + parse one frame
+      g_radio.process();                 // pump TCI WebSocket + refresh state
       link = g_radio.connected();
     }
   }
 
+  // R2.9: no hot-switching while the radio is transmitting/tuning.
+  g_out.setInhibit(g_radio.isTx() || g_radio.isTune());
+
   // Decide what should be connected (R2.7 mapping, R2.10 failsafe).
+  int band = g_radio.band();
   int desired;
   if (g_override != -2) {
     desired = (g_override == -1) ? -1 : g_override;   // manual override (R2.11)
-  } else if (!link || g_curBand < 0) {
+  } else if (!link || band < 0) {
     desired = -1;                                     // failsafe: all off
   } else {
-    desired = g_cfg.band_relay[g_curBand];            // may be -1 (none)
+    desired = g_cfg.band_relay[band];                 // may be -1 (none)
   }
-  g_sw.setDesired(desired);
-  g_sw.tick();                                        // break-before-make
+  g_out.setDesired(desired);
+  g_out.tick();                                       // break-before-make
 
   digitalWrite(STATUS_LED, link ? LOW : HIGH);        // LED on = TCI linked
   handleSerial();

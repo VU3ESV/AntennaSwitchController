@@ -190,14 +190,21 @@ python3 ~/Library/Arduino15/packages/esp8266/hardware/esp8266/*/tools/espota.py 
 ## 5. Firmware source map (`Controller/`)
 
 ```
-Controller.ino     setup/loop, TCI event handlers, OTA, failsafe, serial console
+Controller.ino     setup/loop, OTA, failsafe, serial console (wires the parts)
 BandPlan.h         band list (160–6 m incl. 60 m) + frequency→band resolver
 Config.h           EEPROM settings struct + CRC32 load/save, defaults, MAC hostname
-AntennaSwitch.h    relay control + exclusive break-before-make state machine
+RadioSource.h      abstract "band + TX" source (poll-based); TciSource.h = TCI impl
+OutputStage.h      relay map + abstract output stage; Relay8x1 = break-before-make
 WebPortal.h        HTTP routes + HTML config page (+ /config, /discover)
 TCI.h TCI.cpp      bundled IW7DMH TCI v1.0.1, ESP8266-ported (see R2.1)
 RTX.h RTX.cpp      bundled IW7DMH RTX state (band edges, VFO/TRX/tune getters)
 ```
+
+> The `RadioSource` / `OutputStage` split is phase **P0** of
+> [docs/MULTI-RADIO-SO2R-PLAN.md](docs/MULTI-RADIO-SO2R-PLAN.md): a
+> no-behaviour-change refactor so later phases can add serial/TCP CAT sources
+> and an 8×2 output stage. `mode`/interlock config and the v1→v2 EEPROM
+> migration land with P2, not P0.
 
 ## 6. Confirmed decisions
 
