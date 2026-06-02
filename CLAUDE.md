@@ -199,8 +199,8 @@ Config.h           EEPROM settings struct + CRC32 load/save, defaults, MAC hostn
 RadioSource.h      abstract "band + TX" source (poll-based)
 TciSource.h        RadioSource over the bundled TCI client (RX-1 VFO A)
 FlexSource.h       RadioSource over FlexRadio SmartSDR (TCP 4992); P1, build-verified
-OutputStage.h      relay map + abstract output stage; Relay8x1 = break-before-make
-Interlock.h        SO2R Mode A: MasterArbiter (LAN arbiter) + SlaveClient (P2b)
+OutputStage.h      relay map; Relay8x1 (8×1 break-before-make) + Relay8x2 (8×2 A/B)
+Interlock.h        SO2R MasterArbiter + SlaveClient (Mode A) + DualResolver (Mode B)
 WebPortal.h        HTTP routes + HTML config page (+ /config, /discover)
 TCI.h TCI.cpp      bundled IW7DMH TCI v1.0.1, ESP8266-ported (see R2.1)
 RTX.h RTX.cpp      bundled IW7DMH RTX state (band edges, VFO/TRX/tune getters)
@@ -217,8 +217,13 @@ RTX.h RTX.cpp      bundled IW7DMH RTX state (band edges, VFO/TRX/tune getters)
 > v2→v3 EEPROM migration, `Interlock.h` (master `MasterArbiter` + slave
 > `SlaveClient`), the `/interlock*` HTTP API, and app UI (role picker +
 > dashboard interlock badge). First-come / current-holder-keeps-it interlock,
-> **live-validated on two boards**. Mode B (single board + 8×2, `Relay8x2`)
-> remains for P2a.
+> **live-validated on two boards**. **P2a** added **Mode B** (`mode=dual`): one
+> board tracks both radios (a second `RadioSource`) and drives an external **8×2**
+> switch via `Relay8x2` (per-antenna A/B, 8× SPDT) with an in-firmware
+> `DualResolver` (same first-come policy, per-radio TX-safety). Config v3→v4
+> (radio 2 + `switch_type`); app gains a Radio 2 settings section + dual
+> dashboard. Mode B is **build-verified** (no 8×2 switch wired yet); the v3→v4
+> migration is hardware-validated and leaves Mode A boards unchanged.
 
 ## 6. Confirmed decisions
 

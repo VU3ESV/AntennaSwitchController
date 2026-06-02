@@ -139,19 +139,35 @@ class WebPortal {
     h += F("<fieldset><legend>SO2R role (Mode A)</legend>");
     h += F("<label>Role</label><select name=mode>");
     h += "<option value=0" + String(c.mode == MODE_STANDALONE ? " selected" : "") + ">Standalone (single radio)</option>";
-    h += "<option value=1" + String(c.mode == MODE_MASTER     ? " selected" : "") + ">Master (Radio 1, arbiter)</option>";
-    h += "<option value=2" + String(c.mode == MODE_SLAVE      ? " selected" : "") + ">Slave (Radio 2)</option>";
+    h += "<option value=1" + String(c.mode == MODE_MASTER     ? " selected" : "") + ">Master (Mode A — Radio 1, arbiter)</option>";
+    h += "<option value=2" + String(c.mode == MODE_SLAVE      ? " selected" : "") + ">Slave (Mode A — Radio 2)</option>";
+    h += "<option value=3" + String(c.mode == MODE_DUAL       ? " selected" : "") + ">Dual (Mode B — both radios, 8&times;2)</option>";
     h += F("</select>");
     h += "<label>Master address <span class=muted>(slave only — IP of the master)</span></label>"
          "<input name=peer value=\"" + esc(c.peer_host) + "\">";
     h += F("<label>Interlock policy</label><select name=ilk>");
     h += "<option value=0" + String(c.interlock_policy == ILK_FIRST_COME ? " selected" : "") + ">First-come (holder keeps it)</option>";
-    h += "<option value=1" + String(c.interlock_policy == ILK_PRIORITY   ? " selected" : "") + ">Priority (master wins)</option>";
+    h += "<option value=1" + String(c.interlock_policy == ILK_PRIORITY   ? " selected" : "") + ">Priority (Radio 1 wins)</option>";
     h += F("</select><label>On master loss (slave)</label><select name=ploss>");
     h += "<option value=0" + String(c.on_peer_loss == PEER_LOSS_SAFE ? " selected" : "") + ">Safe (all off)</option>";
     h += "<option value=1" + String(c.on_peer_loss == PEER_LOSS_HOLD ? " selected" : "") + ">Hold last</option>";
-    h += F("</select><p class=muted>Two 8&times;1 boards, one radio each, "
-           "coordinated over the LAN so the two radios never share an antenna.</p></fieldset>");
+    h += F("</select><p class=muted>Mode A: two 8&times;1 boards (one radio each) over the LAN. "
+           "Mode B: one board drives an external 8&times;2 switch from both radios below.</p></fieldset>");
+
+    // --- Mode B: radio 2 + external switch type ---
+    h += F("<fieldset><legend>Radio 2 (Mode B / Dual)</legend>");
+    h += F("<label>Type</label><select name=r2type>");
+    h += "<option value=0" + String(c.radio2_type == RADIO_TCI  ? " selected" : "") + ">TCI (ExpertSDR / SunSDR)</option>";
+    h += "<option value=1" + String(c.radio2_type == RADIO_FLEX ? " selected" : "") + ">FlexRadio (SmartSDR TCP)</option>";
+    h += F("</select><div class=row>");
+    h += "<div><label>Host / IP</label><input name=r2host value=\"" + esc(c.radio2_host) + "\"></div>";
+    h += "<div><label>Port</label><input name=r2port type=number value=" + String(c.radio2_port) + "></div>";
+    h += F("</div><label>External switch</label><select name=swtype>");
+    h += "<option value=0" + String(c.switch_type == SWITCH_8X1 ? " selected" : "") + ">8&times;1 (single radio)</option>";
+    h += "<option value=1" + String(c.switch_type == SWITCH_8X2 ? " selected" : "") + ">8&times;2 (per-antenna A/B, 8&times; SPDT)</option>";
+    h += F("</select><p class=muted>Dual drives an external 8&times;2 switch: relay <i>i</i> "
+           "de-energized routes antenna <i>i</i> to Radio 1, energized to Radio 2. "
+           "One serial-CAT radio max per board, so radio 2 must be TCI/Flex here.</p></fieldset>");
 
     h += F("<fieldset><legend>Device</legend>");
     h += "<label>Hostname (mDNS / OTA)</label><input name=hostname value=\"" + esc(c.hostname) + "\">";
@@ -193,10 +209,14 @@ class WebPortal {
     copyArg("host",     c.tci_host,  sizeof(c.tci_host),  false);
     copyArg("hostname", c.hostname,  sizeof(c.hostname),  false);
     copyArg("otapass",  c.ota_pass,  sizeof(c.ota_pass),  true);   // blank = keep
-    copyArg("peer",     c.peer_host, sizeof(c.peer_host), false);
-    if (server_.hasArg("mode"))  c.mode             = (uint8_t)constrain(server_.arg("mode").toInt(), 0, 2);
-    if (server_.hasArg("ilk"))   c.interlock_policy = (uint8_t)constrain(server_.arg("ilk").toInt(), 0, 1);
-    if (server_.hasArg("ploss")) c.on_peer_loss     = (uint8_t)constrain(server_.arg("ploss").toInt(), 0, 1);
+    copyArg("peer",     c.peer_host,   sizeof(c.peer_host),   false);
+    copyArg("r2host",   c.radio2_host, sizeof(c.radio2_host), false);
+    if (server_.hasArg("mode"))   c.mode             = (uint8_t)constrain(server_.arg("mode").toInt(), 0, 3);
+    if (server_.hasArg("ilk"))    c.interlock_policy = (uint8_t)constrain(server_.arg("ilk").toInt(), 0, 1);
+    if (server_.hasArg("ploss"))  c.on_peer_loss     = (uint8_t)constrain(server_.arg("ploss").toInt(), 0, 1);
+    if (server_.hasArg("r2type")) c.radio2_type      = (uint8_t)constrain(server_.arg("r2type").toInt(), 0, 1);
+    if (server_.hasArg("r2port")) c.radio2_port      = (uint16_t)server_.arg("r2port").toInt();
+    if (server_.hasArg("swtype")) c.switch_type      = (uint8_t)constrain(server_.arg("swtype").toInt(), 0, 1);
     if (server_.hasArg("port"))   c.tci_port    = (uint16_t)server_.arg("port").toInt();
     if (server_.hasArg("region")) c.iaru_region = (uint8_t)constrain(server_.arg("region").toInt(), 1, 3);
     if (server_.hasArg("rtype"))  c.radio_type  = (uint8_t)constrain(server_.arg("rtype").toInt(), 0, 1);
@@ -251,6 +271,10 @@ class WebPortal {
     j += "\"peer_host\":\"" + esc(c.peer_host) + "\",";
     j += "\"interlock_policy\":" + String(c.interlock_policy) + ",";
     j += "\"on_peer_loss\":" + String(c.on_peer_loss) + ",";
+    j += "\"radio2_type\":" + String(c.radio2_type) + ",";
+    j += "\"radio2_host\":\"" + esc(c.radio2_host) + "\",";
+    j += "\"radio2_port\":" + String(c.radio2_port) + ",";
+    j += "\"switch_type\":" + String(c.switch_type) + ",";
     j += "\"region\":"      + String(c.iaru_region) + ",";
     j += "\"guard_ms\":"    + String(c.guard_ms) + ",";
     j += "\"bands\":[";

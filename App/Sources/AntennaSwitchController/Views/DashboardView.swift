@@ -37,14 +37,30 @@ struct DashboardView: View {
                         if s.isSwitching { StatusBadge("Switching", kind: .neutral) }
                     }
 
-                    // SO2R Mode A interlock (hidden for standalone units).
+                    // SO2R interlock (hidden for standalone units). For Mode A the
+                    // master_ant/slave_ant are the two boards; for Mode B (dual)
+                    // they are Radio 1 / Radio 2 on this one board.
                     if let ilk = s.interlock, !ilk.isStandalone {
                         HStack(spacing: 10) {
-                            StatusBadge(ilk.role.capitalized, kind: .neutral)
-                            StatusBadge(ilk.peerIsUp ? "Peer up" : "Peer down",
-                                        kind: ilk.peerIsUp ? .success : .danger)
+                            StatusBadge(ilk.isDual ? "Dual (Mode B)" : ilk.role.capitalized, kind: .neutral)
+                            if !ilk.isDual {
+                                StatusBadge(ilk.peerIsUp ? "Peer up" : "Peer down",
+                                            kind: ilk.peerIsUp ? .success : .danger)
+                            }
                             if ilk.masterAnt >= 0 { StatusBadge("R1 → R\(ilk.masterAnt + 1)", kind: .neutral) }
                             if ilk.slaveAnt >= 0  { StatusBadge("R2 → R\(ilk.slaveAnt + 1)",  kind: .neutral) }
+                        }
+                    }
+
+                    // Mode B: Radio 2's band/frequency on this board.
+                    if let r2 = s.radio2 {
+                        LazyVGrid(columns: columns, alignment: .leading, spacing: 12) {
+                            StatCard(title: "Radio 2 Band", value: r2.band, systemImage: "waveform")
+                            StatCard(title: "Radio 2 Freq", value: r2.freqMHz, systemImage: "dot.radiowaves.right")
+                        }
+                        HStack(spacing: 10) {
+                            StatusBadge("Radio 2 TCI", kind: r2.tciUp ? .success : .neutral)
+                            StatusBadge("Radio 2 TX", kind: r2.transmitting ? .danger : .neutral)
                         }
                     }
 
