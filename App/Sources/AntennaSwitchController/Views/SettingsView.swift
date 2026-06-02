@@ -71,6 +71,25 @@ struct SettingsView: View {
                 }
             }
 
+            Section("SO2R Role (Mode A)") {
+                Picker("Role", selection: $vm.config.mode) {
+                    ForEach(CtrlMode.allCases, id: \.self) { Text($0.label).tag($0) }
+                }
+                if vm.config.mode == .slave {
+                    TextField("Master address (IP)", text: $vm.config.peerHost)
+                }
+                if vm.config.mode != .standalone {
+                    Picker("Interlock policy", selection: $vm.config.interlockPolicy) {
+                        ForEach(InterlockPolicy.allCases, id: \.self) { Text($0.label).tag($0) }
+                    }
+                }
+                if vm.config.mode == .slave {
+                    Picker("On master loss", selection: $vm.config.onPeerLoss) {
+                        ForEach(PeerLoss.allCases, id: \.self) { Text($0.label).tag($0) }
+                    }
+                }
+            }
+
             Section {
                 HStack {
                     Button { Task { await vm.save() } } label: {

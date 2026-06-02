@@ -20,6 +20,7 @@
 #include "RadioSource.h"
 #include "TciSource.h"
 #include "FlexSource.h"
+#include "Interlock.h"
 #include "WebPortal.h"
 
 #define STATUS_LED   2          // onboard blue LED (active-LOW), GPIO2
@@ -34,6 +35,10 @@ TciSource    g_tci;             // TCI (RX-1 VFO A)
 FlexSource   g_flex;            // FlexRadio SmartSDR (TCP 4992)
 RadioSource* g_radio = &g_tci;
 
+// SO2R Mode A interlock (used only when cfg.mode is master/slave).
+MasterArbiter g_master;         // master: the LAN arbiter
+SlaveClient   g_slave;          // slave: claims antennas from the master
+
 bool     g_apMode   = false;
 int      g_override = -2;       // -2 auto, -1 force none, 0..7 force relay
 
@@ -45,6 +50,38 @@ void applyRadio() {
                                              : (RadioSource*)&g_tci;
   g_radio->configure(g_cfg.tci_host, g_cfg.tci_port, g_cfg.iaru_region);
   if (strlen(g_cfg.tci_host)) g_radio->connect();
+}
+
+// Apply SO2R interlock config (master policy / slave peer + failsafe).
+void applyInterlock() {
+  g_master.setPolicy(g_cfg.interlock_policy);
+  g_slave.configure(g_cfg.peer_host, g_cfg.on_peer_loss);
+}
+
+// Resolve the local desired antenna through the active mode's interlock.
+int interlockResolve(int localDesired) {
+  switch (g_cfg.mode) {
+    case MODE_MASTER: g_master.tick(); return g_master.resolveMaster(localDesired);
+    case MODE_SLAVE:  return g_slave.resolve(localDesired);
+    default:          return localDesired;   // standalone (and unhandled dual)
+  }
+}
+
+// ---- interlock HTTP callbacks (master side) --------------------------------
+int  onClaim(int ant)  { return (g_cfg.mode == MODE_MASTER) ? g_master.claim(ant) : 0; }
+void onRelease()       { if (g_cfg.mode == MODE_MASTER) g_master.release(); }
+String interlockJson() {
+  const char* role = g_cfg.mode == MODE_MASTER ? "master"
+                   : g_cfg.mode == MODE_SLAVE  ? "slave" : "standalone";
+  bool up = g_cfg.mode == MODE_MASTER ? g_master.peerUp()
+          : g_cfg.mode == MODE_SLAVE  ? g_slave.peerUp() : false;
+  String j = "{\"role\":\"";
+  j += role;
+  j += "\",\"peer_up\":" + String(up ? 1 : 0);
+  j += ",\"master_ant\":" + String(g_master.masterAnt());
+  j += ",\"slave_ant\":"  + String(g_master.slaveAnt());
+  j += "}";
+  return j;
 }
 
 // ---- web portal callbacks --------------------------------------------------
@@ -60,13 +97,15 @@ String statusJson() {
   j += "\"tune\":"         + String(g_radio->isTune() ? 1 : 0) + ",";
   j += "\"override\":"     + String(g_override) + ",";
   j += "\"active_relay\":" + String(g_out.activeRelay()) + ",";   // -1 = none
-  j += "\"switching\":"    + String(g_out.switching() ? 1 : 0);
+  j += "\"switching\":"    + String(g_out.switching() ? 1 : 0) + ",";
+  j += "\"interlock\":"    + interlockJson();
   j += "}";
   return j;
 }
 
 void onSave() {
   g_out.setGuardMs(g_cfg.guard_ms);
+  applyInterlock();                 // master policy / slave peer + failsafe
   if (!g_apMode) applyRadio();      // may switch transport (TCI <-> Flex)
 }
 void onOverride(int mode) { g_override = mode; }
@@ -156,8 +195,10 @@ void setup() {
     Serial.printf("setup AP '%s' at http://%s/\n", AP_SSID, WiFi.softAPIP().toString().c_str());
   }
 
-  // 3. Web portal.
-  g_web.begin(g_cfg, statusJson, onSave, onOverride, onReboot);
+  // 3. SO2R interlock + web portal.
+  applyInterlock();
+  g_web.begin(g_cfg, statusJson, onSave, onOverride, onReboot,
+              onClaim, onRelease, interlockJson);
   Serial.println(F("ready"));
 }
 
@@ -177,16 +218,20 @@ void loop() {
   // R2.9: no hot-switching while the radio is transmitting/tuning.
   g_out.setInhibit(g_radio->isTx() || g_radio->isTune());
 
-  // Decide what should be connected (R2.7 mapping, R2.10 failsafe).
+  // Decide what this unit wants (R2.7 mapping, R2.10 failsafe).
   int band = g_radio->band();
-  int desired;
+  int localDesired;
   if (g_override != -2) {
-    desired = (g_override == -1) ? -1 : g_override;   // manual override (R2.11)
+    localDesired = (g_override == -1) ? -1 : g_override;  // manual override (R2.11)
   } else if (!link || band < 0) {
-    desired = -1;                                     // failsafe: all off
+    localDesired = -1;                                    // failsafe: all off
   } else {
-    desired = g_cfg.band_relay[band];                 // may be -1 (none)
+    localDesired = g_cfg.band_relay[band];                // may be -1 (none)
   }
+
+  // SO2R Mode A: arbitrate against the peer so the two radios never share an
+  // antenna index (standalone passes through unchanged).
+  int desired = interlockResolve(localDesired);
   g_out.setDesired(desired);
   g_out.tick();                                       // break-before-make
 

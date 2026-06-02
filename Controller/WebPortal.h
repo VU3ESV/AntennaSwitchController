@@ -23,16 +23,24 @@ typedef String (*StatusFn)();
 typedef void   (*SaveFn)();
 typedef void   (*OverrideFn)(int);   // -2 auto, -1 none, 0..7 relay
 typedef void   (*RebootFn)();
+typedef int    (*ClaimFn)(int);      // SO2R: slave claim → 1 granted / 0 denied
+typedef void   (*ReleaseFn)();       // SO2R: slave release
+typedef String (*InterlockFn)();     // SO2R: interlock state JSON
 
 class WebPortal {
  public:
   void begin(Config& cfg, StatusFn statusFn, SaveFn saveFn,
-             OverrideFn ovrFn, RebootFn rebootFn) {
-    cfg_      = &cfg;
-    statusFn_ = statusFn;
-    saveFn_   = saveFn;
-    ovrFn_    = ovrFn;
-    rebootFn_ = rebootFn;
+             OverrideFn ovrFn, RebootFn rebootFn,
+             ClaimFn claimFn = nullptr, ReleaseFn releaseFn = nullptr,
+             InterlockFn interlockFn = nullptr) {
+    cfg_         = &cfg;
+    statusFn_    = statusFn;
+    saveFn_      = saveFn;
+    ovrFn_       = ovrFn;
+    rebootFn_    = rebootFn;
+    claimFn_     = claimFn;
+    releaseFn_   = releaseFn;
+    interlockFn_ = interlockFn;
 
     server_.on("/",         HTTP_GET,  [this]{ handleRoot(); });
     server_.on("/save",     HTTP_POST, [this]{ handleSave(); });
@@ -41,6 +49,10 @@ class WebPortal {
     server_.on("/relay",    HTTP_POST, [this]{ handleRelay(); });
     server_.on("/reboot",   HTTP_POST, [this]{ server_.send(200, "text/plain", "rebooting"); rebootFn_(); });
     server_.on("/discover", HTTP_GET,  [this]{ handleDiscover(); });
+    // SO2R Mode A interlock API (§6.1).
+    server_.on("/interlock",         HTTP_GET,  [this]{ handleInterlockGet(); });
+    server_.on("/interlock/claim",   HTTP_POST, [this]{ handleClaim(); });
+    server_.on("/interlock/release", HTTP_POST, [this]{ handleRelease(); });
     server_.begin();
   }
 
@@ -48,11 +60,14 @@ class WebPortal {
 
  private:
   ESP8266WebServer server_{80};
-  Config*    cfg_      = nullptr;
-  StatusFn   statusFn_ = nullptr;
-  SaveFn     saveFn_   = nullptr;
-  OverrideFn ovrFn_    = nullptr;
-  RebootFn   rebootFn_ = nullptr;
+  Config*     cfg_         = nullptr;
+  StatusFn    statusFn_    = nullptr;
+  SaveFn      saveFn_      = nullptr;
+  OverrideFn  ovrFn_       = nullptr;
+  RebootFn    rebootFn_    = nullptr;
+  ClaimFn     claimFn_     = nullptr;
+  ReleaseFn   releaseFn_   = nullptr;
+  InterlockFn interlockFn_ = nullptr;
 
   static String esc(const char* s) {
     String o;
@@ -120,6 +135,24 @@ class WebPortal {
     h += F("</table><p class=muted>Multiple bands may share one relay. "
            "Relays on GPIO0/15/16 may twitch at power-up.</p></fieldset>");
 
+    // --- SO2R Mode A (master/slave) ---
+    h += F("<fieldset><legend>SO2R role (Mode A)</legend>");
+    h += F("<label>Role</label><select name=mode>");
+    h += "<option value=0" + String(c.mode == MODE_STANDALONE ? " selected" : "") + ">Standalone (single radio)</option>";
+    h += "<option value=1" + String(c.mode == MODE_MASTER     ? " selected" : "") + ">Master (Radio 1, arbiter)</option>";
+    h += "<option value=2" + String(c.mode == MODE_SLAVE      ? " selected" : "") + ">Slave (Radio 2)</option>";
+    h += F("</select>");
+    h += "<label>Master address <span class=muted>(slave only — IP of the master)</span></label>"
+         "<input name=peer value=\"" + esc(c.peer_host) + "\">";
+    h += F("<label>Interlock policy</label><select name=ilk>");
+    h += "<option value=0" + String(c.interlock_policy == ILK_FIRST_COME ? " selected" : "") + ">First-come (holder keeps it)</option>";
+    h += "<option value=1" + String(c.interlock_policy == ILK_PRIORITY   ? " selected" : "") + ">Priority (master wins)</option>";
+    h += F("</select><label>On master loss (slave)</label><select name=ploss>");
+    h += "<option value=0" + String(c.on_peer_loss == PEER_LOSS_SAFE ? " selected" : "") + ">Safe (all off)</option>";
+    h += "<option value=1" + String(c.on_peer_loss == PEER_LOSS_HOLD ? " selected" : "") + ">Hold last</option>";
+    h += F("</select><p class=muted>Two 8&times;1 boards, one radio each, "
+           "coordinated over the LAN so the two radios never share an antenna.</p></fieldset>");
+
     h += F("<fieldset><legend>Device</legend>");
     h += "<label>Hostname (mDNS / OTA)</label><input name=hostname value=\"" + esc(c.hostname) + "\">";
     h += F("<label>OTA password <span class=muted>(blank = keep)</span></label><input name=otapass type=password>");
@@ -160,6 +193,10 @@ class WebPortal {
     copyArg("host",     c.tci_host,  sizeof(c.tci_host),  false);
     copyArg("hostname", c.hostname,  sizeof(c.hostname),  false);
     copyArg("otapass",  c.ota_pass,  sizeof(c.ota_pass),  true);   // blank = keep
+    copyArg("peer",     c.peer_host, sizeof(c.peer_host), false);
+    if (server_.hasArg("mode"))  c.mode             = (uint8_t)constrain(server_.arg("mode").toInt(), 0, 2);
+    if (server_.hasArg("ilk"))   c.interlock_policy = (uint8_t)constrain(server_.arg("ilk").toInt(), 0, 1);
+    if (server_.hasArg("ploss")) c.on_peer_loss     = (uint8_t)constrain(server_.arg("ploss").toInt(), 0, 1);
     if (server_.hasArg("port"))   c.tci_port    = (uint16_t)server_.arg("port").toInt();
     if (server_.hasArg("region")) c.iaru_region = (uint8_t)constrain(server_.arg("region").toInt(), 1, 3);
     if (server_.hasArg("rtype"))  c.radio_type  = (uint8_t)constrain(server_.arg("rtype").toInt(), 0, 1);
@@ -186,6 +223,20 @@ class WebPortal {
     server_.send(303, "text/plain", "ok");
   }
 
+  // --- SO2R Mode A interlock API (§6.1) -------------------------------------
+  void handleInterlockGet() {
+    server_.send(200, "application/json", interlockFn_ ? interlockFn_() : "{}");
+  }
+  void handleClaim() {                       // slave → master: claim an antenna
+    int ant = server_.hasArg("ant") ? server_.arg("ant").toInt() : -1;
+    int granted = claimFn_ ? claimFn_(ant) : 0;
+    server_.send(200, "text/plain", granted ? "1" : "0");
+  }
+  void handleRelease() {                     // slave → master: release its hold
+    if (releaseFn_) releaseFn_();
+    server_.send(200, "text/plain", "1");
+  }
+
   // Current stored settings as JSON, for the macOS app to populate its forms.
   // Passwords (wifi_pass, ota_pass) are deliberately never returned.
   void handleConfig() {
@@ -196,6 +247,10 @@ class WebPortal {
     j += "\"tci_host\":\""  + esc(c.tci_host) + "\",";
     j += "\"tci_port\":"    + String(c.tci_port) + ",";
     j += "\"radio_type\":"  + String(c.radio_type) + ",";
+    j += "\"mode\":"        + String(c.mode) + ",";
+    j += "\"peer_host\":\"" + esc(c.peer_host) + "\",";
+    j += "\"interlock_policy\":" + String(c.interlock_policy) + ",";
+    j += "\"on_peer_loss\":" + String(c.on_peer_loss) + ",";
     j += "\"region\":"      + String(c.iaru_region) + ",";
     j += "\"guard_ms\":"    + String(c.guard_ms) + ",";
     j += "\"bands\":[";

@@ -37,6 +37,17 @@ struct DashboardView: View {
                         if s.isSwitching { StatusBadge("Switching", kind: .neutral) }
                     }
 
+                    // SO2R Mode A interlock (hidden for standalone units).
+                    if let ilk = s.interlock, !ilk.isStandalone {
+                        HStack(spacing: 10) {
+                            StatusBadge(ilk.role.capitalized, kind: .neutral)
+                            StatusBadge(ilk.peerIsUp ? "Peer up" : "Peer down",
+                                        kind: ilk.peerIsUp ? .success : .danger)
+                            if ilk.masterAnt >= 0 { StatusBadge("R1 → R\(ilk.masterAnt + 1)", kind: .neutral) }
+                            if ilk.slaveAnt >= 0  { StatusBadge("R2 → R\(ilk.slaveAnt + 1)",  kind: .neutral) }
+                        }
+                    }
+
                     if let ident = vm.identity {
                         Text("\(ident.device) • firmware \(ident.version ?? "?") • \(ident.relays ?? kRelayCount) relays")
                             .font(.caption).foregroundStyle(theme.textSecondary)
