@@ -20,6 +20,18 @@
 #include <ESP8266HTTPClient.h>
 #include "Config.h"
 
+// ---- Heartbeat (Mode A) ---------------------------------------------------
+// The slave contacts the master every HB_BEAT_MS (its claim/release doubles as
+// the heartbeat). Peer loss is declared only after HB_MAX_MISS *consecutive*
+// missed beats, so a single dropped packet on a lossy LAN never drops an
+// antenna. Both sides use the same window: the slave counts its failed POSTs;
+// the master ages the slave's last contact (HB_BEAT_MS × HB_MAX_MISS).
+//   - Master sees slave loss  → frees the slave's antenna (master may reuse it).
+//   - Slave  sees master loss → applies on_peer_loss (safe → none, or hold).
+static const uint32_t HB_BEAT_MS  = 2000;
+static const int      HB_MAX_MISS = 3;
+static const uint32_t HB_WINDOW_MS = HB_BEAT_MS * HB_MAX_MISS;   // 6 s
+
 // ---- Master side: the arbiter --------------------------------------------
 class MasterArbiter {
  public:
@@ -49,19 +61,25 @@ class MasterArbiter {
   }
   void release() { lastSlaveMs_ = millis(); slaveAnt_ = -1; }
 
-  // Expire the slave's holding if it has gone silent (crashed / off the LAN),
-  // so the master may then use that antenna. Call every loop().
+  // Expire the slave's holding once it has missed the whole heartbeat window
+  // (crashed / off the LAN), so the master may then use that antenna. Call
+  // every loop().
   void tick() {
-    if (slaveAnt_ >= 0 && (uint32_t)(millis() - lastSlaveMs_) > kTimeoutMs) slaveAnt_ = -1;
+    if (slaveAnt_ >= 0 && (uint32_t)(millis() - lastSlaveMs_) > HB_WINDOW_MS) slaveAnt_ = -1;
   }
 
   bool slaveHeld() const { return slaveAnt_ >= 0; }
-  bool peerUp()    const { return lastSlaveMs_ != 0 && (uint32_t)(millis() - lastSlaveMs_) <= kTimeoutMs; }
+  bool peerUp()    const { return lastSlaveMs_ != 0 && (uint32_t)(millis() - lastSlaveMs_) <= HB_WINDOW_MS; }
   int  masterAnt() const { return masterAnt_; }
   int  slaveAnt()  const { return slaveAnt_; }
 
+  // Whole heartbeats since the slave last made contact (0 if fresh / never).
+  int beatsMissed() const {
+    if (lastSlaveMs_ == 0) return HB_MAX_MISS;
+    return (int)((uint32_t)(millis() - lastSlaveMs_) / HB_BEAT_MS);
+  }
+
  private:
-  static const uint32_t kTimeoutMs = 6000;   // 3× the slave heartbeat
   uint8_t  policy_      = ILK_FIRST_COME;
   int      masterAnt_   = -1;
   int      slaveAnt_    = -1;
@@ -118,33 +136,45 @@ class SlaveClient {
     host_[sizeof(host_) - 1] = '\0';
     onPeerLoss_ = onPeerLoss;
   }
-  bool peerUp() const { return peerUp_; }
+  bool peerUp()      const { return peerUp_; }
+  int  missedBeats() const { return missed_; }
 
   // Resolve the SLAVE radio's desired antenna by claiming it from the master.
-  // Returns the antenna the slave may drive (granted, or -1). Throttled: only
-  // talks to the master when the desire changes or on a ~2 s heartbeat (which
-  // also keeps the master's contact timer alive).
+  // Returns the antenna the slave may drive (granted, or -1). The claim/release
+  // doubles as the heartbeat: it fires when the desire changes or every
+  // HB_BEAT_MS, keeping the master's contact timer alive. A failed beat is
+  // tolerated (the current grant is held) until HB_MAX_MISS consecutive misses,
+  // at which point the master is declared lost and on_peer_loss applies — so a
+  // single dropped packet never drops the antenna.
   int resolve(int desired) {
     uint32_t now = millis();
-    bool due = (desired != lastDesired_) || (uint32_t)(now - lastBeat_) >= kBeatMs;
+    bool due = (desired != lastDesired_) || (uint32_t)(now - lastBeat_) >= HB_BEAT_MS;
     if (!due) return allowed_;
     lastBeat_ = now; lastDesired_ = desired;
 
-    if (strlen(host_) == 0) { peerUp_ = false; return failsafe(); }
+    if (strlen(host_) == 0) { missed_ = HB_MAX_MISS; peerUp_ = false; return failsafe(); }
 
     bool granted = false;
     int code = (desired < 0)
              ? post("/interlock/release", granted)
              : post(String("/interlock/claim?ant=") + desired, granted);
 
-    if (code != 200) { peerUp_ = false; return failsafe(); }
+    if (code != 200) return missedBeat();      // debounce transient loss
+
+    missed_  = 0;                               // heartbeat ok
     peerUp_  = true;
     allowed_ = (desired < 0) ? -1 : (granted ? desired : -1);
     return allowed_;
   }
 
  private:
-  static const uint32_t kBeatMs = 2000;
+  // A missed heartbeat: hold the current grant until HB_MAX_MISS in a row, then
+  // declare the master lost and fail safe.
+  int missedBeat() {
+    if (missed_ < HB_MAX_MISS) missed_++;
+    if (missed_ >= HB_MAX_MISS) { peerUp_ = false; return failsafe(); }
+    return allowed_;                            // tolerate: keep current antenna
+  }
 
   int failsafe() {
     // PEER_LOSS_SAFE → none; PEER_LOSS_HOLD → keep the last granted antenna.
@@ -170,6 +200,7 @@ class SlaveClient {
   char     host_[64]   = {0};
   uint8_t  onPeerLoss_ = PEER_LOSS_SAFE;
   bool     peerUp_     = false;
+  int      missed_     = 0;       // consecutive missed heartbeats
   int      allowed_    = -1;
   int      lastDesired_ = -2;
   uint32_t lastBeat_   = 0;

@@ -46,6 +46,10 @@ struct DashboardView: View {
                             if !ilk.isDual {
                                 StatusBadge(ilk.peerIsUp ? "Peer up" : "Peer down",
                                             kind: ilk.peerIsUp ? .success : .danger)
+                                // Heartbeat health: flag tolerated misses before loss.
+                                if let m = ilk.beatsMissed, m > 0, ilk.peerIsUp {
+                                    StatusBadge("♥ \(m) missed", kind: .warning)
+                                }
                             }
                             if ilk.masterAnt >= 0 { StatusBadge("R1 → R\(ilk.masterAnt + 1)", kind: .neutral) }
                             if ilk.slaveAnt >= 0  { StatusBadge("R2 → R\(ilk.slaveAnt + 1)",  kind: .neutral) }

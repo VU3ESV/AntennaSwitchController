@@ -213,17 +213,36 @@ threaded, so the master serializes peer requests and its own loop — no locking
 
 | Endpoint | On | Purpose |
 |---|---|---|
-| `GET /interlock` | both | `{role, active, desired, band, peerUp}` (`active` = relay idx or −1) |
-| `POST /interlock/claim?ant=i` | master | slave asks for antenna i → `{granted}` (denied iff `i == master.active`) |
-| `POST /interlock/release?ant=i` | slave | master tells slave to drop i → slave breaks, then acks |
+| `GET /interlock` | both | `{role, peer_up, beats_missed, master_ant, slave_ant}` (`*_ant` = relay idx or −1) |
+| `POST /interlock/claim?ant=i` | master | slave asks for antenna i → body `1` (granted) / `0` (denied iff `i == master_ant`) |
+| `POST /interlock/release` | master | slave gives up its hold → body `1` |
 
 - **Slave** (Radio 2 → desired `d`): `claim(d)` → granted ⇒ break-before-make to
-  `d`; denied ⇒ fall back `secondary[d]` → none. Master unreachable ⇒ **failsafe**
-  to none (`on_peer_loss = safe`).
-- **Master** (Radio 1 → `d`, priority): if slave holds `d`, `release(d)` and
-  **wait the ack** (slave breaks first) → then master break-before-make ⇒
-  break-before-make **across** units. Slave unreachable ⇒ it already failed safe,
-  so master proceeds.
+  `d`; denied ⇒ fall back to none (per-band `secondary[d]` is a P3 addition).
+  `d < 0` ⇒ `release`. Master unreachable ⇒ **failsafe** per `on_peer_loss`
+  (`safe` → none, default; `hold` → keep last).
+- **Master** (Radio 1 → `d`): arbitrates its own radio against the slave's
+  holding (`slave_ant`). First-come (default): if the slave holds `d`, the
+  master falls back to none; otherwise it takes `d`. (Priority policy: the
+  master preempts and the slave is denied on its next beat.) The master is the
+  single arbiter, so the two boards never resolve to the same antenna index.
+
+#### Heartbeat & failure detection (as built)
+The slave's `claim`/`release` **doubles as the heartbeat** — it fires whenever
+the desired antenna changes and at least every `HB_BEAT_MS` (2 s). Loss is
+declared only after `HB_MAX_MISS` (3) **consecutive** missed beats (a 6 s
+window), so a single dropped packet on a lossy LAN never drops an antenna:
+
+- **Slave → master health.** Each beat is a short-timeout (600 ms) HTTP POST.
+  A failed beat is *tolerated* — the slave holds its current antenna — until 3
+  in a row, then it declares the master lost and applies `on_peer_loss`. A
+  successful beat resets the miss counter and (if needed) re-establishes the
+  grant. `beats_missed` is exposed in `/status`.
+- **Master → slave health.** The master ages the slave's last contact; after
+  the same 6 s window it treats the slave as gone, frees `slave_ant` (so the
+  master may use that antenna), and reports `peer_up = 0`.
+- Recovery is automatic: the first successful beat after the link returns
+  re-claims the antenna and clears `beats_missed`.
 
 ### 6.2 Mode B (single board, in firmware)
 One MCU sees both radios, so interlock is a local decision each control tick:
