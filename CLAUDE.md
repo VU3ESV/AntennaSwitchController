@@ -121,7 +121,7 @@ at power-up, and SHOULD prefer GPIO14/12/13/4/5 for the most-used bands.
   | `/`        | GET    | Config form: WiFi, TCI host/port, band→relay map, manual override |
   | `/save`    | POST   | Persist settings                                 |
   | `/status`  | GET    | JSON: current band, active relay, TCI/WiFi/TX/Tune, mode |
-  | `/config`  | GET    | JSON: stored settings (band→relay map, TCI host/port, region, hostname, guard, SSID — **never** passwords) for the macOS app |
+  | `/config`  | GET    | JSON: stored settings (band→relay map, radio_type, radio host/port, region, hostname, guard, SSID — **never** passwords) for the macOS app |
   | `/relay`   | POST   | Manual override: `set=auto\|none\|0..7`          |
   | `/discover`| GET    | Device identity + mDNS metadata + firmware version |
   | `/reboot`  | POST   | Soft reboot                                      |
@@ -193,7 +193,9 @@ python3 ~/Library/Arduino15/packages/esp8266/hardware/esp8266/*/tools/espota.py 
 Controller.ino     setup/loop, OTA, failsafe, serial console (wires the parts)
 BandPlan.h         band list (160–6 m incl. 60 m) + frequency→band resolver
 Config.h           EEPROM settings struct + CRC32 load/save, defaults, MAC hostname
-RadioSource.h      abstract "band + TX" source (poll-based); TciSource.h = TCI impl
+RadioSource.h      abstract "band + TX" source (poll-based)
+TciSource.h        RadioSource over the bundled TCI client (RX-1 VFO A)
+FlexSource.h       RadioSource over FlexRadio SmartSDR (TCP 4992); P1, build-verified
 OutputStage.h      relay map + abstract output stage; Relay8x1 = break-before-make
 WebPortal.h        HTTP routes + HTML config page (+ /config, /discover)
 TCI.h TCI.cpp      bundled IW7DMH TCI v1.0.1, ESP8266-ported (see R2.1)
@@ -202,9 +204,12 @@ RTX.h RTX.cpp      bundled IW7DMH RTX state (band edges, VFO/TRX/tune getters)
 
 > The `RadioSource` / `OutputStage` split is phase **P0** of
 > [docs/MULTI-RADIO-SO2R-PLAN.md](docs/MULTI-RADIO-SO2R-PLAN.md): a
-> no-behaviour-change refactor so later phases can add serial/TCP CAT sources
-> and an 8×2 output stage. `mode`/interlock config and the v1→v2 EEPROM
-> migration land with P2, not P0.
+> no-behaviour-change refactor so later phases can add more radio sources and an
+> 8×2 output stage. **P1** added `FlexSource` (FlexRadio SmartSDR over TCP) and a
+> `radio_type` config field selecting the transport (TCI / FlexRadio), with a
+> v1→v2 EEPROM migration that preserves the saved band map. FlexRadio is
+> build-verified only (no live rig tested yet). `mode`/interlock + the second
+> radio land with P2.
 
 ## 6. Confirmed decisions
 

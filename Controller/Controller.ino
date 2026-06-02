@@ -19,6 +19,7 @@
 #include "OutputStage.h"
 #include "RadioSource.h"
 #include "TciSource.h"
+#include "FlexSource.h"
 #include "WebPortal.h"
 
 #define STATUS_LED   2          // onboard blue LED (active-LOW), GPIO2
@@ -27,10 +28,24 @@
 Config     g_cfg;
 Relay8x1   g_out;               // 8×1 exclusive break-before-make output stage
 WebPortal  g_web;
-TciSource  g_radio;             // single TCI radio (RX-1 VFO A)
+
+// Concrete radio sources; g_radio points at the one selected by cfg.radio_type.
+TciSource    g_tci;             // TCI (RX-1 VFO A)
+FlexSource   g_flex;            // FlexRadio SmartSDR (TCP 4992)
+RadioSource* g_radio = &g_tci;
 
 bool     g_apMode   = false;
-int      g_override = -2;       // -2 auto (TCI), -1 force none, 0..7 force relay
+int      g_override = -2;       // -2 auto, -1 force none, 0..7 force relay
+
+// Point g_radio at the configured transport, (re)connect it. Disconnects the
+// previously-selected source first so /save can switch transports cleanly.
+void applyRadio() {
+  g_radio->disconnect();
+  g_radio = (g_cfg.radio_type == RADIO_FLEX) ? (RadioSource*)&g_flex
+                                             : (RadioSource*)&g_tci;
+  g_radio->configure(g_cfg.tci_host, g_cfg.tci_port, g_cfg.iaru_region);
+  if (strlen(g_cfg.tci_host)) g_radio->connect();
+}
 
 // ---- web portal callbacks --------------------------------------------------
 String statusJson() {
@@ -38,11 +53,11 @@ String statusJson() {
   j += "\"ap\":"           + String(g_apMode ? 1 : 0) + ",";
   j += "\"wifi\":"         + String(WiFi.status() == WL_CONNECTED ? 1 : 0) + ",";
   j += "\"ip\":\""         + (g_apMode ? WiFi.softAPIP() : WiFi.localIP()).toString() + "\",";
-  j += "\"tci\":"          + String(g_radio.connected() ? 1 : 0) + ",";
-  j += "\"freq\":"         + String(g_radio.freqHz()) + ",";
-  j += "\"band\":\""       + String(bandName(g_radio.band())) + "\",";
-  j += "\"tx\":"           + String(g_radio.isTx() ? 1 : 0) + ",";
-  j += "\"tune\":"         + String(g_radio.isTune() ? 1 : 0) + ",";
+  j += "\"tci\":"          + String(g_radio->connected() ? 1 : 0) + ",";
+  j += "\"freq\":"         + String(g_radio->freqHz()) + ",";
+  j += "\"band\":\""       + String(bandName(g_radio->band())) + "\",";
+  j += "\"tx\":"           + String(g_radio->isTx() ? 1 : 0) + ",";
+  j += "\"tune\":"         + String(g_radio->isTune() ? 1 : 0) + ",";
   j += "\"override\":"     + String(g_override) + ",";
   j += "\"active_relay\":" + String(g_out.activeRelay()) + ",";   // -1 = none
   j += "\"switching\":"    + String(g_out.switching() ? 1 : 0);
@@ -52,11 +67,7 @@ String statusJson() {
 
 void onSave() {
   g_out.setGuardMs(g_cfg.guard_ms);
-  if (!g_apMode) {
-    g_radio.disconnect();
-    g_radio.configure(g_cfg.tci_host, g_cfg.tci_port, g_cfg.iaru_region);
-    if (strlen(g_cfg.tci_host)) g_radio.connect();
-  }
+  if (!g_apMode) applyRadio();      // may switch transport (TCI <-> Flex)
 }
 void onOverride(int mode) { g_override = mode; }
 void onReboot()           { delay(200); ESP.restart(); }
@@ -82,10 +93,10 @@ void setupOTA() {
   ArduinoOTA.setHostname(g_cfg.hostname);
   if (strlen(g_cfg.ota_pass)) ArduinoOTA.setPassword(g_cfg.ota_pass);
   ArduinoOTA.onStart([]() {
-    // R4.3: safe state + drop TCI so the WS client can't fight the updater.
+    // R4.3: safe state + drop the radio link so it can't fight the updater.
     g_out.setInhibit(true);
     g_out.beginSafe();
-    g_radio.disconnect();
+    g_radio->disconnect();
   });
   ArduinoOTA.begin();
 }
@@ -139,8 +150,7 @@ void setup() {
     }
     setupOTA();
 
-    g_radio.configure(g_cfg.tci_host, g_cfg.tci_port, g_cfg.iaru_region);
-    if (strlen(g_cfg.tci_host)) g_radio.connect();
+    applyRadio();                      // select TCI/Flex by cfg.radio_type
   } else {
     startAP();
     Serial.printf("setup AP '%s' at http://%s/\n", AP_SSID, WiFi.softAPIP().toString().c_str());
@@ -159,16 +169,16 @@ void loop() {
     MDNS.update();
     ArduinoOTA.handle();
     if (WiFi.status() == WL_CONNECTED) {
-      g_radio.process();                 // pump TCI WebSocket + refresh state
-      link = g_radio.connected();
+      g_radio->process();                // pump transport + refresh state
+      link = g_radio->connected();
     }
   }
 
   // R2.9: no hot-switching while the radio is transmitting/tuning.
-  g_out.setInhibit(g_radio.isTx() || g_radio.isTune());
+  g_out.setInhibit(g_radio->isTx() || g_radio->isTune());
 
   // Decide what should be connected (R2.7 mapping, R2.10 failsafe).
-  int band = g_radio.band();
+  int band = g_radio->band();
   int desired;
   if (g_override != -2) {
     desired = (g_override == -1) ? -1 : g_override;   // manual override (R2.11)

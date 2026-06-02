@@ -25,6 +25,16 @@ class RadioSource {
   // One-time setup (open sockets / UART). Safe to call after WiFi is up.
   virtual void begin() {}
 
+  // Point the source at its radio. `host`/`port` are the radio endpoint
+  // (TCI server, Flex IP, …); `iaruRegion` is informational (TCI only). Apply
+  // before connect(); on a live link, disconnect() first. Sources ignore
+  // arguments they don't use. Default no-op for argument-less sources.
+  virtual void configure(const char* host, int port, int iaruRegion) {
+    (void)host; (void)port; (void)iaruRegion;
+  }
+  virtual void connect()    {}   // begin/maintain the link to the radio
+  virtual void disconnect() {}   // drop the link
+
   // Pump the transport and refresh cached band/TX/tune. Call every loop().
   virtual void process() {}
 

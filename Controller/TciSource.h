@@ -15,15 +15,16 @@
 class TciSource : public RadioSource {
  public:
   // Point the client at a TCI server. Apply before connect(); on a live link,
-  // disconnect() first (Controller.ino does this on /save).
-  void configure(char* host, int port, int iaruRegion) {
-    tci_.set_host(host);
+  // disconnect() first (Controller.ino does this on /save). The TCI library's
+  // set_host() takes a non-const char*, hence the const_cast.
+  void configure(const char* host, int port, int iaruRegion) override {
+    tci_.set_host(const_cast<char*>(host));
     tci_.set_port(port);
     tci_.set_iaru_region(iaruRegion);
   }
 
-  void connect()    { tci_.connect(); }
-  void disconnect() { tci_.disconnect(); }
+  void connect()    override { tci_.connect(); }
+  void disconnect() override { tci_.disconnect(); }
 
   void process() override {
     tci_.process();                       // pump WebSocket + drain one frame

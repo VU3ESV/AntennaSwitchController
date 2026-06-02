@@ -95,10 +95,15 @@ class WebPortal {
     h += F("<label>Password <span class=muted>(blank = keep)</span></label><input name=pass type=password>");
     h += F("</fieldset>");
 
-    h += F("<fieldset><legend>TCI server</legend><div class=row>");
+    h += F("<fieldset><legend>Radio</legend>");
+    h += F("<label>Type</label><select name=rtype>");
+    h += "<option value=0" + String(c.radio_type == RADIO_TCI  ? " selected" : "") + ">TCI (ExpertSDR / SunSDR)</option>";
+    h += "<option value=1" + String(c.radio_type == RADIO_FLEX ? " selected" : "") + ">FlexRadio (SmartSDR TCP)</option>";
+    h += F("</select><div class=row>");
     h += "<div><label>Host / IP</label><input name=host value=\"" + esc(c.tci_host) + "\"></div>";
     h += "<div><label>Port</label><input name=port type=number value=" + String(c.tci_port) + "></div>";
-    h += F("</div><label>IARU region</label><select name=region>");
+    h += F("</div><p class=muted>TCI port default 50001; FlexRadio SmartSDR is 4992.</p>");
+    h += F("<label>IARU region <span class=muted>(TCI only)</span></label><select name=region>");
     for (int r = 1; r <= 3; r++)
       h += "<option value=" + String(r) + (c.iaru_region == r ? " selected" : "") + ">" + String(r) + "</option>";
     h += F("</select></fieldset>");
@@ -157,6 +162,7 @@ class WebPortal {
     copyArg("otapass",  c.ota_pass,  sizeof(c.ota_pass),  true);   // blank = keep
     if (server_.hasArg("port"))   c.tci_port    = (uint16_t)server_.arg("port").toInt();
     if (server_.hasArg("region")) c.iaru_region = (uint8_t)constrain(server_.arg("region").toInt(), 1, 3);
+    if (server_.hasArg("rtype"))  c.radio_type  = (uint8_t)constrain(server_.arg("rtype").toInt(), 0, 1);
     if (server_.hasArg("guard"))  c.guard_ms    = (uint16_t)constrain(server_.arg("guard").toInt(), 0, 5000);
     for (int b = 0; b < NUM_BANDS; b++) {
       String key = "b" + String(b);
@@ -189,6 +195,7 @@ class WebPortal {
     j += "\"ssid\":\""      + esc(c.wifi_ssid) + "\",";
     j += "\"tci_host\":\""  + esc(c.tci_host) + "\",";
     j += "\"tci_port\":"    + String(c.tci_port) + ",";
+    j += "\"radio_type\":"  + String(c.radio_type) + ",";
     j += "\"region\":"      + String(c.iaru_region) + ",";
     j += "\"guard_ms\":"    + String(c.guard_ms) + ",";
     j += "\"bands\":[";
