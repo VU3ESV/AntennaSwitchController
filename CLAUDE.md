@@ -272,3 +272,12 @@ Controllers. Mirrors the conventions of `VU3ESV/BandPassFilterControllerApp`.
 Global git `safe.bareRepository=explicit` blocks SwiftPM from reading fetched
 checkouts. Prefix builds with
 `GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.bareRepository GIT_CONFIG_VALUE_0=all`.
+
+---
+
+# Roadmap
+
+- [docs/MULTI-RADIO-SO2R-PLAN.md](docs/MULTI-RADIO-SO2R-PLAN.md) — plan to support
+  **multiple radio types/transports** (TCI + serial CAT via the ESP UART, with
+  level converters) and **SO2R**: two radios driving an **8×2** matrix, with a
+  runtime **8×1 / 8×2** mode. References `nigelfenton/shackswitch`.
