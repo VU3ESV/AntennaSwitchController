@@ -25,6 +25,7 @@ let package = Package(
             name: "AntennaSwitchController",
             dependencies: [
                 .product(name: "RadioPluginKit", package: "RadioPluginKit"),
+                .product(name: "RadioPluginUI", package: "RadioPluginKit"),
             ],
             path: "Sources/AntennaSwitchController"
         ),

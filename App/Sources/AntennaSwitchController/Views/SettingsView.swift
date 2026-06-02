@@ -1,4 +1,5 @@
 import SwiftUI
+import RadioPluginUI
 
 /// Full configuration form — mirrors every option on the controller's web page:
 /// WiFi, TCI server, band→relay map, hostname, OTA password, guard delay.
@@ -13,7 +14,7 @@ struct SettingsView: View {
                 VStack(spacing: 12) {
                     ProgressView("Loading configuration…")
                     if let err = vm.errorMessage {
-                        Banner(text: err, systemImage: "exclamationmark.triangle.fill", tint: .orange)
+                        Banner(level: .warning, title: "Couldn’t load configuration", message: err)
                         Button("Retry") { Task { await vm.loadConfig() } }
                     }
                 }

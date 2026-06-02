@@ -1,4 +1,5 @@
 import SwiftUI
+import RadioPluginUI
 
 /// Detail pane for one controller: Dashboard / Controls / Settings tabs, plus
 /// toolbar actions (open web portal, reboot). Owns the polling view model.
@@ -43,11 +44,12 @@ struct ControllerDetailView: View {
 }
 
 struct ConnectionDot: View {
+    @Environment(\.radioTheme) private var theme
     let connected: Bool
     var body: some View {
         HStack(spacing: 5) {
-            Circle().fill(connected ? Color.green : Color.secondary).frame(width: 9, height: 9)
-            Text(connected ? "Online" : "Offline").font(.caption).foregroundStyle(.secondary)
+            Circle().fill(connected ? theme.success : theme.textSecondary).frame(width: 9, height: 9)
+            Text(connected ? "Online" : "Offline").font(.caption).foregroundStyle(theme.textSecondary)
         }
     }
 }

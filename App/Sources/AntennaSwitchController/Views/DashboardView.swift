@@ -1,8 +1,11 @@
 import SwiftUI
+import RadioPluginUI
 
-/// Live operational view of a controller's `/status`.
+/// Live operational view of a controller's `/status`. Uses the host-injected
+/// `RadioTheme` (via RadioPluginUI components + tokens) so it matches the suite.
 struct DashboardView: View {
     @ObservedObject var vm: ControllerViewModel
+    @Environment(\.radioTheme) private var theme
 
     private let columns = [GridItem(.adaptive(minimum: 180), spacing: 12)]
 
@@ -10,7 +13,7 @@ struct DashboardView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 if let err = vm.errorMessage, !vm.connected {
-                    Banner(text: err, systemImage: "exclamationmark.triangle.fill", tint: .orange)
+                    Banner(level: .error, title: "Disconnected", message: err)
                 }
 
                 if let s = vm.status {
@@ -26,18 +29,19 @@ struct DashboardView: View {
                     }
 
                     HStack(spacing: 10) {
-                        StatusBadge(label: s.apMode ? "Setup AP" : "WiFi", on: s.apMode ? true : s.wifiUp, onColor: s.apMode ? .orange : .green)
-                        StatusBadge(label: "TCI", on: s.tciUp, onColor: .green)
-                        StatusBadge(label: "TX", on: s.transmitting, onColor: .red)
-                        StatusBadge(label: "Tune", on: s.tuning, onColor: .yellow)
-                        if s.isSwitching { StatusBadge(label: "Switching", on: true, onColor: .blue) }
+                        StatusBadge(s.apMode ? "Setup AP" : "WiFi",
+                                    kind: s.apMode ? .warning : (s.wifiUp ? .success : .neutral))
+                        StatusBadge("TCI", kind: s.tciUp ? .success : .neutral)
+                        StatusBadge("TX", kind: s.transmitting ? .danger : .neutral)
+                        StatusBadge("Tune", kind: s.tuning ? .warning : .neutral)
+                        if s.isSwitching { StatusBadge("Switching", kind: .neutral) }
                     }
 
                     if let ident = vm.identity {
                         Text("\(ident.device) • firmware \(ident.version ?? "?") • \(ident.relays ?? kRelayCount) relays")
-                            .font(.caption).foregroundStyle(.secondary)
+                            .font(.caption).foregroundStyle(theme.textSecondary)
                     }
-                    Text("IP \(s.ip)").font(.caption).foregroundStyle(.secondary)
+                    Text("IP \(s.ip)").font(.caption).foregroundStyle(theme.textSecondary)
                 } else {
                     ProgressView("Connecting to \(vm.host)…")
                         .frame(maxWidth: .infinity, minHeight: 200)
@@ -45,47 +49,26 @@ struct DashboardView: View {
             }
             .padding()
         }
+        .background(theme.background)
     }
 }
 
+/// One metric tile, themed via the host palette.
 struct StatCard: View {
+    @Environment(\.radioTheme) private var theme
     let title: String
     let value: String
     let systemImage: String
+
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Label(title, systemImage: systemImage).font(.caption).foregroundStyle(.secondary)
+            Label(title, systemImage: systemImage)
+                .font(.caption).foregroundStyle(theme.textSecondary)
             Text(value).font(.title3).bold().lineLimit(1).minimumScaleFactor(0.6)
+                .foregroundStyle(theme.textPrimary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(12)
-        .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 10))
-    }
-}
-
-struct StatusBadge: View {
-    let label: String
-    let on: Bool
-    var onColor: Color = .green
-    var body: some View {
-        HStack(spacing: 5) {
-            Circle().fill(on ? onColor : Color.secondary.opacity(0.4)).frame(width: 8, height: 8)
-            Text(label).font(.caption)
-        }
-        .padding(.horizontal, 10).padding(.vertical, 5)
-        .background(.quaternary.opacity(0.4), in: Capsule())
-    }
-}
-
-struct Banner: View {
-    let text: String
-    var systemImage: String = "info.circle"
-    var tint: Color = .accentColor
-    var body: some View {
-        Label(text, systemImage: systemImage)
-            .font(.callout)
-            .padding(10)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(tint.opacity(0.15), in: RoundedRectangle(cornerRadius: 8))
+        .background(theme.surface, in: RoundedRectangle(cornerRadius: theme.cornerRadius))
     }
 }

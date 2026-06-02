@@ -1,4 +1,5 @@
 import SwiftUI
+import RadioPluginUI
 
 /// Standalone-app entry. In the suite this type is unused (the container owns
 /// the process); the plugin path is `AntennaSwitchPlugin`. Kept `public` so the
@@ -24,6 +25,11 @@ public struct AntennaSwitchStandaloneApp: App {
                         .onAppear { store.start() }
                 }
             }
+            // Standalone owns its chrome: adopt the suite's dark-LCD theme + a dark
+            // appearance so standard controls match. In the suite the host injects
+            // the theme/appearance around the plugin's root instead.
+            .radioTheme(.dark)
+            .preferredColorScheme(.dark)
         }
         .windowStyle(.titleBar)
         .windowToolbarStyle(.unified)

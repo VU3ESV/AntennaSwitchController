@@ -1,4 +1,5 @@
 import SwiftUI
+import RadioPluginUI
 
 /// Root UI: a sidebar of controllers (saved + discovered) and a detail pane for
 /// the selected controller. Shared by the standalone app and the suite plugin.
@@ -15,7 +16,11 @@ struct ContentView: View {
                 ControllerDetailView(controller: c)
                     .id(c.id)   // fresh view model per selected controller
             } else {
-                EmptyStateView(showAdd: $showAdd)
+                EmptyStateView(systemImage: "antenna.radiowaves.left.and.right",
+                               title: "No Controller Selected",
+                               message: "Add a controller by IP, or pick one discovered on your network.",
+                               actionTitle: "Add by IP",
+                               action: { showAdd = true })
             }
         }
         .sheet(isPresented: $showAdd) { AddControllerView() }
@@ -107,22 +112,5 @@ struct AddControllerView: View {
         }
         .padding(20)
         .frame(width: 480)
-    }
-}
-
-struct EmptyStateView: View {
-    @Binding var showAdd: Bool
-
-    var body: some View {
-        VStack(spacing: 14) {
-            Image(systemName: "antenna.radiowaves.left.and.right")
-                .font(.system(size: 48)).foregroundStyle(.secondary)
-            Text("No Controller Selected").font(.title3)
-            Text("Add a controller by IP, or pick one discovered on your network.")
-                .foregroundStyle(.secondary)
-            Button { showAdd = true } label: { Label("Add by IP", systemImage: "plus") }
-                .buttonStyle(.borderedProminent)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
