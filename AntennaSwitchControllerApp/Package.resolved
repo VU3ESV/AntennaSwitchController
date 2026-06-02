@@ -1,0 +1,14 @@
+{
+  "pins" : [
+    {
+      "identity" : "radiopluginkit",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/VU3ESV/RadioPluginKit.git",
+      "state" : {
+        "revision" : "47330ac183e2d848180d3c459744b242c7f888e2",
+        "version" : "1.0.0"
+      }
+    }
+  ],
+  "version" : 2
+}

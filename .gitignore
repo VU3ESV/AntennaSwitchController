@@ -1,0 +1,15 @@
+# macOS
+.DS_Store
+
+# Swift Package Manager build / local artifacts
+AntennaSwitchControllerApp/.build/
+AntennaSwitchControllerApp/dist/
+**/.build/
+*.swiftpm
+
+# Generated icon staging (regenerate with Resources/make-icon.swift); keep the .icns
+AntennaSwitchControllerApp/Resources/AppIcon.iconset/
+
+# Arduino build cache (arduino-cli builds outside the tree by default)
+build/
+*.bin

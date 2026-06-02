@@ -1,0 +1,24 @@
+{
+    "configurations": [
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:AntennaSwitchController}/AntennaSwitchControllerApp",
+            "name": "Debug AntennaSwitchController (AntennaSwitchControllerApp)",
+            "target": "AntennaSwitchController",
+            "configuration": "debug",
+            "preLaunchTask": "swift: Build Debug AntennaSwitchController (AntennaSwitchControllerApp)"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:AntennaSwitchController}/AntennaSwitchControllerApp",
+            "name": "Release AntennaSwitchController (AntennaSwitchControllerApp)",
+            "target": "AntennaSwitchController",
+            "configuration": "release",
+            "preLaunchTask": "swift: Build Release AntennaSwitchController (AntennaSwitchControllerApp)"
+        }
+    ]
+}
