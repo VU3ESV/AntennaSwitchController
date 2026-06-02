@@ -13,6 +13,17 @@ BINARY="AntennaSwitchControllerApp"   # executable product name (see Package.swi
 DIST="dist"
 BUNDLE="$DIST/$APP_NAME.app"
 
+# Version stamped into Info.plist. The release pipeline passes the tag it is
+# about to publish (VERSION=0.1.3); a local build falls back to `git describe`
+# so the About box still shows something meaningful.
+if [ -z "${VERSION:-}" ]; then
+  # `|| true` keeps a tagless checkout (e.g. CI's shallow clone) from tripping
+  # `set -e`/`pipefail` when git describe exits non-zero.
+  VERSION="$(git describe --tags --abbrev=0 2>/dev/null || true)"
+  VERSION="${VERSION#v}"
+  VERSION="${VERSION:-0.0.0-dev}"
+fi
+
 # Universal builds (both Apple Silicon and Intel) for distributable releases.
 # NB: empty-array expansion must be `${a[@]+"${a[@]}"}` to stay safe under
 # `set -u` on macOS's bash 3.2 (a bare "${a[@]}" errors when the array is empty).
@@ -35,7 +46,8 @@ echo "▶ Assembling app bundle…"
 rm -rf "$BUNDLE"
 mkdir -p "$BUNDLE/Contents/MacOS" "$BUNDLE/Contents/Resources"
 cp "$BIN_PATH" "$BUNDLE/Contents/MacOS/$BINARY"
-cp Resources/Info.plist "$BUNDLE/Contents/Info.plist"
+echo "  stamping version ${VERSION}"
+sed "s/__VERSION__/${VERSION}/g" Resources/Info.plist > "$BUNDLE/Contents/Info.plist"
 if [ -f Resources/AppIcon.icns ]; then
   cp Resources/AppIcon.icns "$BUNDLE/Contents/Resources/AppIcon.icns"
 fi
