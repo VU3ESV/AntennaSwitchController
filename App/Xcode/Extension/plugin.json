@@ -1,0 +1,12 @@
+{
+  "id": "org.vu3esv.radiosuite.AntennaSwitch",
+  "name": "Antenna Switch",
+  "version": "1.0.0",
+  "sdkVersion": "1.2",
+  "minHostVersion": "1.0",
+  "isolation": "out-of-process",
+  "capabilities": ["network.client", "bonjour", "notifications"],
+  "systemImage": "antenna.radiowaves.left.and.right",
+  "author": "VU3ESV",
+  "homepage": "https://github.com/VU3ESV/AntennaSwitchController"
+}

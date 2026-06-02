@@ -36,6 +36,16 @@ jobs:
       - name: Build release .app bundle
         run: ./build-app.sh
 
+      - name: Build plugin package (.appex / .radioplugin)
+        run: |
+          # XcodeGen emits a recent project format; select the newest installed Xcode
+          # so xcodebuild can read it (the runner default may be older).
+          sudo xcode-select -s "$(ls -d /Applications/Xcode*.app | sort -V | tail -1)"
+          xcodebuild -version
+          brew list xcodegen >/dev/null 2>&1 || brew install xcodegen
+          ./scripts/make-radioplugin.sh
+          ls -lh dist/AntennaSwitch.radioplugin
+
       - name: Upload app bundle (non-canonical; release is the real artifact)
         uses: actions/upload-artifact@v4
         with:
