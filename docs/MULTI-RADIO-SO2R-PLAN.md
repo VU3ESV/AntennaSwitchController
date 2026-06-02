@@ -62,6 +62,15 @@ A radio is **a source of "current band + TX state"**:
   so drivers stay tiny. The bundled TCI lib already has **two RTX slots** — handy
   for two TCI radios (shared or dual server, as in BPF).
 
+#### Multi-receiver radios (e.g. SunSDR2) — *implemented*
+A single radio with **two receivers** (SunSDR2 PRO, ExpertSDR multi-RX) exposes
+them over TCI as **two RTX slots** (`rtx[0]` = RX1, `rtx[1]` = RX2). `TciSource`
+takes a **receiver index** (`setRig(0|1)`), so Mode B drives such a radio as
+SO2R from **one board**: radio 1 and radio 2 point at the **same host/port**,
+radio 1 = RX1, radio 2 = RX2. Each `TciSource` opens its own TCI connection and
+reads its rig — verified working with two simultaneous clients on one SunSDR2
+(RX1 40 m → antenna A, RX2 10 m → antenna B). Config: `radio_rx` / `radio2_rx`.
+
 ### ⚠️ One hardware serial port per board
 The ESP-12F board has exactly **one usable UART** (UART0, GPIO1/3) — the relays
 occupy the other GPIOs and UART1/GPIO2 is TX-only. Therefore **a single board can

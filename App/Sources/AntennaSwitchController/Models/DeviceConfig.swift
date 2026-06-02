@@ -85,6 +85,8 @@ struct DeviceConfig: Codable, Equatable {
     var radio2Host: String
     var radio2Port: Int
     var switchType: SwitchType    // external switch wiring (8x1 / 8x2)
+    var radioRx: Int              // radio 1 TCI receiver index (0=RX1, 1=RX2)
+    var radio2Rx: Int             // radio 2 TCI receiver index (0=RX1, 1=RX2)
 
     // Write-only, never present in /config — excluded from CodingKeys below.
     var wifiPassword: String = ""
@@ -103,6 +105,8 @@ struct DeviceConfig: Codable, Equatable {
         case radio2Host = "radio2_host"
         case radio2Port = "radio2_port"
         case switchType = "switch_type"
+        case radioRx = "radio_rx"
+        case radio2Rx = "radio2_rx"
     }
 
     // Older firmware omits the newer fields — decode them as sensible defaults
@@ -125,6 +129,8 @@ struct DeviceConfig: Codable, Equatable {
         radio2Host      = try c.decodeIfPresent(String.self, forKey: .radio2Host) ?? ""
         radio2Port      = try c.decodeIfPresent(Int.self, forKey: .radio2Port) ?? 50001
         switchType      = try c.decodeIfPresent(SwitchType.self, forKey: .switchType) ?? .eightByOne
+        radioRx         = try c.decodeIfPresent(Int.self, forKey: .radioRx) ?? 0
+        radio2Rx        = try c.decodeIfPresent(Int.self, forKey: .radio2Rx) ?? 0
     }
 
     init(hostname: String, ssid: String, radioType: RadioType = .tci,
@@ -132,7 +138,7 @@ struct DeviceConfig: Codable, Equatable {
          mode: CtrlMode = .standalone, peerHost: String = "",
          interlockPolicy: InterlockPolicy = .firstCome, onPeerLoss: PeerLoss = .safe,
          radio2Type: RadioType = .tci, radio2Host: String = "", radio2Port: Int = 50001,
-         switchType: SwitchType = .eightByOne) {
+         switchType: SwitchType = .eightByOne, radioRx: Int = 0, radio2Rx: Int = 0) {
         self.hostname = hostname; self.ssid = ssid; self.radioType = radioType
         self.tciHost = tciHost; self.tciPort = tciPort; self.region = region
         self.guardMs = guardMs; self.bands = bands
@@ -140,6 +146,7 @@ struct DeviceConfig: Codable, Equatable {
         self.interlockPolicy = interlockPolicy; self.onPeerLoss = onPeerLoss
         self.radio2Type = radio2Type; self.radio2Host = radio2Host
         self.radio2Port = radio2Port; self.switchType = switchType
+        self.radioRx = radioRx; self.radio2Rx = radio2Rx
     }
 
     /// Build the `POST /save` form body matching the firmware's field names
@@ -161,6 +168,8 @@ struct DeviceConfig: Codable, Equatable {
             URLQueryItem(name: "r2host",   value: radio2Host),
             URLQueryItem(name: "r2port",   value: String(radio2Port)),
             URLQueryItem(name: "swtype",   value: String(switchType.rawValue)),
+            URLQueryItem(name: "rrx",      value: String(radioRx)),
+            URLQueryItem(name: "r2rx",     value: String(radio2Rx)),
         ]
         // Blank passwords mean "keep existing" — the firmware skips empty ones.
         if !wifiPassword.isEmpty { items.append(URLQueryItem(name: "pass",    value: wifiPassword)) }

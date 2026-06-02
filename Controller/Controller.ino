@@ -53,6 +53,7 @@ int      g_override = -2;       // -2 auto, -1 force none, 0..7 force relay
 // previously-selected source first so /save can switch transports cleanly.
 void applyRadio() {
   g_radio->disconnect();
+  g_tci.setRig(g_cfg.radio_rx);        // which TCI receiver (0=RX1, 1=RX2)
   g_radio = (g_cfg.radio_type == RADIO_FLEX) ? (RadioSource*)&g_flex
                                              : (RadioSource*)&g_tci;
   g_radio->configure(g_cfg.tci_host, g_cfg.tci_port, g_cfg.iaru_region);
@@ -64,6 +65,7 @@ void applyRadio2() {
   g_tci2.disconnect();
   g_flex2.disconnect();
   if (g_cfg.mode != MODE_DUAL) return;       // radio 2 only exists in dual mode
+  g_tci2.setRig(g_cfg.radio2_rx);            // RX2 for a 2-receiver radio
   g_radio2 = (g_cfg.radio2_type == RADIO_FLEX) ? (RadioSource*)&g_flex2
                                                : (RadioSource*)&g_tci2;
   g_radio2->configure(g_cfg.radio2_host, g_cfg.radio2_port, g_cfg.iaru_region);

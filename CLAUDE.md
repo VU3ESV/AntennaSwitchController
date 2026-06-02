@@ -121,7 +121,7 @@ at power-up, and SHOULD prefer GPIO14/12/13/4/5 for the most-used bands.
   | `/`        | GET    | Config form: WiFi, TCI host/port, band→relay map, manual override |
   | `/save`    | POST   | Persist settings                                 |
   | `/status`  | GET    | JSON: current band, active relay, TCI/WiFi/TX/Tune, mode |
-  | `/config`  | GET    | JSON: stored settings (band→relay map, radio_type, radio host/port, region, hostname, guard, SSID — **never** passwords) for the macOS app |
+  | `/config`  | GET    | JSON: stored settings (band→relay map, radio_type, radio host/port, receiver index, mode/peer/interlock, radio2_*, switch_type, region, hostname, guard, SSID — **never** passwords) for the macOS app |
   | `/relay`   | POST   | Manual override: `set=auto\|none\|0..7`          |
   | `/discover`| GET    | Device identity + mDNS metadata + firmware version |
   | `/reboot`  | POST   | Soft reboot                                      |
@@ -197,7 +197,7 @@ Controller.ino     setup/loop, OTA, failsafe, serial console (wires the parts)
 BandPlan.h         band list (160–6 m incl. 60 m) + frequency→band resolver
 Config.h           EEPROM settings struct + CRC32 load/save, defaults, MAC hostname
 RadioSource.h      abstract "band + TX" source (poll-based)
-TciSource.h        RadioSource over the bundled TCI client (RX-1 VFO A)
+TciSource.h        RadioSource over the bundled TCI client; setRig() picks RX1/RX2
 FlexSource.h       RadioSource over FlexRadio SmartSDR (TCP 4992); P1, build-verified
 OutputStage.h      relay map; Relay8x1 (8×1 break-before-make) + Relay8x2 (8×2 A/B)
 Interlock.h        SO2R MasterArbiter + SlaveClient (Mode A, debounced heartbeat) + DualResolver (Mode B)
