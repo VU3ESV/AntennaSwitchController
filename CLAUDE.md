@@ -220,8 +220,13 @@ Controllers. Mirrors the conventions of `VU3ESV/BandPassFilterControllerApp`.
 - `AntennaSwitchController` (library target) → product **`AntennaSwitchControllerKit`**,
   consumed by the suite. Contains everything; only `AntennaSwitchPlugin` and the
   standalone `AntennaSwitchStandaloneApp` are `public`.
-- `AntennaSwitchControllerMain` (executable) → product `AntennaSwitchController`
-  (the standalone `.app`). Just calls `AntennaSwitchStandaloneApp.main()`.
+- `AntennaSwitchControllerMain` (executable) → product **`AntennaSwitchControllerApp`**
+  (the standalone `.app` binary). Just calls `AntennaSwitchStandaloneApp.main()`.
+  The product name deliberately differs from the library target name
+  (`AntennaSwitchController`) — a product whose name equals a target's makes
+  multi-arch/universal XCBuild emit "Multiple commands produce …" errors.
+  `build-app.sh` also builds with `--product` so only the executable (not the
+  library product too) compiles the shared target under universal builds.
 - Depends on `RadioPluginKit` by **Git URL `from: "1.0.0"`** (same as the suite,
   so the whole graph resolves one identical RadioPluginKit — no path/URL clash).
 

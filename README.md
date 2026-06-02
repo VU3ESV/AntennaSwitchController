@@ -144,11 +144,14 @@ it Gatekeeper blocks an unsigned, un-notarized bundle. On first launch, allow
   app (debug + release `.app`) on every push/PR, and compiles the ESP8266 firmware
   with `arduino-cli`.
 - **Release** ([`.github/workflows/release.yml`](.github/workflows/release.yml))
-  triggers on a `v*` tag: it builds the universal `.app`, zips it with `ditto`,
-  and publishes a GitHub Release with the zip + install instructions. Cut one with:
+  triggers on a `v*` tag: it builds the **universal `.app`** *and* compiles the
+  **ESP8266 firmware (`.bin`)**, then publishes a GitHub Release with both
+  assets + install/flash instructions. Cut one with:
   ```bash
   git tag v1.0.0 && git push origin v1.0.0
   ```
+  Each release attaches `Antenna-Switch-Controller-macOS.zip` (the app) and
+  `AntennaSwitchController-firmware.bin` (flash via OTA `espota.py` or USB).
 
 ### Host inside the Amateur Radio Suite
 

@@ -9,7 +9,7 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 APP_NAME="Antenna Switch Controller"
-BINARY="AntennaSwitchController"
+BINARY="AntennaSwitchControllerApp"   # executable product name (see Package.swift)
 DIST="dist"
 BUNDLE="$DIST/$APP_NAME.app"
 
@@ -24,9 +24,12 @@ else
   echo "▶ Building release binary (host arch)…"
 fi
 
-swift build -c release ${ARCH_FLAGS[@]+"${ARCH_FLAGS[@]}"}
+# Build ONLY the executable product. Building all products multi-arch makes the
+# shared library target compile under two products at once, which trips
+# XCBuild's "Multiple commands produce …" duplicate-output bug.
+swift build -c release --product "$BINARY" ${ARCH_FLAGS[@]+"${ARCH_FLAGS[@]}"}
 
-BIN_PATH="$(swift build -c release ${ARCH_FLAGS[@]+"${ARCH_FLAGS[@]}"} --show-bin-path)/$BINARY"
+BIN_PATH="$(swift build -c release --product "$BINARY" ${ARCH_FLAGS[@]+"${ARCH_FLAGS[@]}"} --show-bin-path)/$BINARY"
 
 echo "▶ Assembling app bundle…"
 rm -rf "$BUNDLE"
