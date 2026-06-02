@@ -26,15 +26,20 @@ class TciSource : public RadioSource {
   void connect()    override { tci_.connect(); }
   void disconnect() override { tci_.disconnect(); }
 
+  // Which TCI receiver to track: 0 = RX1 (default), 1 = RX2. A radio with two
+  // receivers (e.g. SunSDR2) exposes them as two RTX slots on one TCI link, so
+  // two TciSources on the same host/port reading rig 0 and rig 1 give SO2R.
+  void setRig(int rig) { rig_ = (rig >= 0 && rig < N_MAX_RTX) ? rig : 0; }
+
   void process() override {
     tci_.process();                       // pump WebSocket + drain one frame
-    long hz = tci_.rtx[0].getVfo(0);      // RX-1 VFO A
+    long hz = tci_.rtx[rig_].getVfo(0);   // selected receiver, VFO A
     if (hz > 0) {
       freq_ = (uint32_t)hz;
       band_ = freqToBand(freq_);
     }
-    tx_   = tci_.rtx[0].getTrx();
-    tune_ = tci_.rtx[0].getTune();
+    tx_   = tci_.rtx[rig_].getTrx();
+    tune_ = tci_.rtx[rig_].getTune();
   }
 
   bool connected() const override { return const_cast<TCI&>(tci_).connected(); }
@@ -45,6 +50,7 @@ class TciSource : public RadioSource {
 
  private:
   TCI      tci_;
+  int      rig_  = 0;        // TCI receiver index (0 = RX1, 1 = RX2)
   uint32_t freq_ = 0;
   int      band_ = -1;
   bool     tx_   = false;

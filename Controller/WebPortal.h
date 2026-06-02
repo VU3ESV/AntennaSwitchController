@@ -117,7 +117,10 @@ class WebPortal {
     h += F("</select><div class=row>");
     h += "<div><label>Host / IP</label><input name=host value=\"" + esc(c.tci_host) + "\"></div>";
     h += "<div><label>Port</label><input name=port type=number value=" + String(c.tci_port) + "></div>";
-    h += F("</div><p class=muted>TCI port default 50001; FlexRadio SmartSDR is 4992.</p>");
+    h += F("</div><label>Receiver <span class=muted>(TCI, 2-RX radios)</span></label><select name=rrx>");
+    h += "<option value=0" + String(c.radio_rx == 0 ? " selected" : "") + ">RX1</option>";
+    h += "<option value=1" + String(c.radio_rx == 1 ? " selected" : "") + ">RX2</option>";
+    h += F("</select><p class=muted>TCI port default 50001; FlexRadio SmartSDR is 4992.</p>");
     h += F("<label>IARU region <span class=muted>(TCI only)</span></label><select name=region>");
     for (int r = 1; r <= 3; r++)
       h += "<option value=" + String(r) + (c.iaru_region == r ? " selected" : "") + ">" + String(r) + "</option>";
@@ -162,7 +165,12 @@ class WebPortal {
     h += F("</select><div class=row>");
     h += "<div><label>Host / IP</label><input name=r2host value=\"" + esc(c.radio2_host) + "\"></div>";
     h += "<div><label>Port</label><input name=r2port type=number value=" + String(c.radio2_port) + "></div>";
-    h += F("</div><label>External switch</label><select name=swtype>");
+    h += F("</div><label>Receiver <span class=muted>(TCI, 2-RX radios)</span></label><select name=r2rx>");
+    h += "<option value=0" + String(c.radio2_rx == 0 ? " selected" : "") + ">RX1</option>";
+    h += "<option value=1" + String(c.radio2_rx == 1 ? " selected" : "") + ">RX2</option>";
+    h += F("</select><p class=muted>For one 2-receiver radio (e.g. SunSDR2): set radio 1 + radio 2 to the "
+           "<b>same Host/Port</b>, radio 1 = RX1, radio 2 = RX2.</p>");
+    h += F("<label>External switch</label><select name=swtype>");
     h += "<option value=0" + String(c.switch_type == SWITCH_8X1 ? " selected" : "") + ">8&times;1 (single radio)</option>";
     h += "<option value=1" + String(c.switch_type == SWITCH_8X2 ? " selected" : "") + ">8&times;2 (per-antenna A/B, 8&times; SPDT)</option>";
     h += F("</select><p class=muted>Dual drives an external 8&times;2 switch: relay <i>i</i> "
@@ -217,6 +225,8 @@ class WebPortal {
     if (server_.hasArg("r2type")) c.radio2_type      = (uint8_t)constrain(server_.arg("r2type").toInt(), 0, 1);
     if (server_.hasArg("r2port")) c.radio2_port      = (uint16_t)server_.arg("r2port").toInt();
     if (server_.hasArg("swtype")) c.switch_type      = (uint8_t)constrain(server_.arg("swtype").toInt(), 0, 1);
+    if (server_.hasArg("rrx"))    c.radio_rx         = (uint8_t)constrain(server_.arg("rrx").toInt(), 0, 1);
+    if (server_.hasArg("r2rx"))   c.radio2_rx        = (uint8_t)constrain(server_.arg("r2rx").toInt(), 0, 1);
     if (server_.hasArg("port"))   c.tci_port    = (uint16_t)server_.arg("port").toInt();
     if (server_.hasArg("region")) c.iaru_region = (uint8_t)constrain(server_.arg("region").toInt(), 1, 3);
     if (server_.hasArg("rtype"))  c.radio_type  = (uint8_t)constrain(server_.arg("rtype").toInt(), 0, 1);
@@ -275,6 +285,8 @@ class WebPortal {
     j += "\"radio2_host\":\"" + esc(c.radio2_host) + "\",";
     j += "\"radio2_port\":" + String(c.radio2_port) + ",";
     j += "\"switch_type\":" + String(c.switch_type) + ",";
+    j += "\"radio_rx\":"    + String(c.radio_rx) + ",";
+    j += "\"radio2_rx\":"   + String(c.radio2_rx) + ",";
     j += "\"region\":"      + String(c.iaru_region) + ",";
     j += "\"guard_ms\":"    + String(c.guard_ms) + ",";
     j += "\"bands\":[";

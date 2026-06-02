@@ -14,7 +14,8 @@
 #define CFG_MAGIC_V1 0x414E5431UL  // "ANT1" — v1: single TCI radio
 #define CFG_MAGIC_V2 0x414E5432UL  // "ANT2" — v2: adds radio_type
 #define CFG_MAGIC_V3 0x414E5433UL  // "ANT3" — v3: adds SO2R mode/peer/interlock
-#define CFG_MAGIC    0x414E5434UL  // "ANT4" — v4: adds radio 2 + switch_type (Mode B)
+#define CFG_MAGIC_V4 0x414E5434UL  // "ANT4" — v4: adds radio 2 + switch_type (Mode B)
+#define CFG_MAGIC    0x414E5435UL  // "ANT5" — v5: adds per-radio TCI receiver index
 #define EEPROM_SIZE  512
 
 // Radio transport for a radio source.
@@ -42,8 +43,10 @@ enum PeerLoss : uint8_t { PEER_LOSS_SAFE = 0, PEER_LOSS_HOLD = 1 };
 //         antenna i to Radio 1, energized routes it to Radio 2.
 enum SwitchType : uint8_t { SWITCH_8X1 = 0, SWITCH_8X2 = 1 };
 
-// v4 settings. tci_host/tci_port are radio 1; radio2_* is the Mode B second
+// v5 settings. tci_host/tci_port are radio 1; radio2_* is the Mode B second
 // radio. tci_host/tci_port serve whichever transport (TCI server, or Flex IP).
+// radio*_rx pick the TCI receiver (0=RX1, 1=RX2) — a 2-receiver radio (SunSDR2)
+// is driven as Mode B with both radios on the same host, rx 0 and rx 1.
 struct Config {
   uint32_t magic;
   char     wifi_ssid[33];
@@ -64,7 +67,34 @@ struct Config {
   char     radio2_host[64];      // DUAL: radio 2 host/IP
   uint16_t radio2_port;          // DUAL: radio 2 port
   uint8_t  switch_type;          // SwitchType: 0=8x1, 1=8x2 (dual)
+  uint8_t  radio_rx;             // radio 1 TCI receiver index (0=RX1, 1=RX2)
+  uint8_t  radio2_rx;            // radio 2 TCI receiver index (0=RX1, 1=RX2)
   uint32_t crc;                  // CRC32 over all preceding bytes
+};
+
+// Frozen v4 layout — migrate v4 saved configs (radio 2 + switch_type, no rx).
+// DO NOT edit: must match exactly what shipped at the v4 bump.
+struct ConfigV4 {
+  uint32_t magic;
+  char     wifi_ssid[33];
+  char     wifi_pass[65];
+  char     tci_host[64];
+  uint16_t tci_port;
+  uint8_t  iaru_region;
+  uint8_t  radio_type;
+  char     hostname[33];
+  char     ota_pass[33];
+  uint16_t guard_ms;
+  int8_t   band_relay[NUM_BANDS];
+  uint8_t  mode;
+  char     peer_host[64];
+  uint8_t  interlock_policy;
+  uint8_t  on_peer_loss;
+  uint8_t  radio2_type;
+  char     radio2_host[64];
+  uint16_t radio2_port;
+  uint8_t  switch_type;
+  uint32_t crc;
 };
 
 // Frozen v3 layout — migrate v3 saved configs (SO2R mode, no radio 2).
@@ -159,6 +189,8 @@ inline void configDefaults(Config& c) {
   c.radio2_type      = RADIO_TCI;
   c.radio2_port      = 50001;
   c.switch_type      = SWITCH_8X1;
+  c.radio_rx         = 0;
+  c.radio2_rx        = 0;
   defaultHostname(c.hostname, sizeof(c.hostname));
   for (int i = 0; i < NUM_BANDS; i++) c.band_relay[i] = -1;  // none
   c.crc = configCrc(c);
@@ -173,6 +205,8 @@ inline void clampConfig(Config& c) {
   if (c.on_peer_loss > PEER_LOSS_HOLD) c.on_peer_loss     = PEER_LOSS_SAFE;
   if (c.radio2_type > RADIO_FLEX)      c.radio2_type      = RADIO_TCI;
   if (c.switch_type > SWITCH_8X2)      c.switch_type      = SWITCH_8X1;
+  if (c.radio_rx  > 1)                 c.radio_rx         = 0;
+  if (c.radio2_rx > 1)                 c.radio2_rx        = 0;
 }
 
 // Migrate a v1 image (no radio_type, no mode) into v3. configDefaults() supplies
@@ -250,7 +284,39 @@ inline bool configMigrateV3(Config& c) {
   return true;
 }
 
-// Returns true if a valid config was loaded (incl. a migrated v1/v2/v3); false
+// Migrate a v4 image (radio 2 + switch_type, no rx index) into v5 — keeps
+// everything; the new per-radio receiver indices default to 0 (RX1).
+inline bool configMigrateV4(Config& c) {
+  ConfigV4 v4;
+  EEPROM.begin(EEPROM_SIZE);
+  EEPROM.get(0, v4);
+  EEPROM.end();
+  if (v4.magic != CFG_MAGIC_V4) return false;
+  if (crc32(reinterpret_cast<const uint8_t*>(&v4), offsetof(ConfigV4, crc)) != v4.crc) return false;
+
+  configDefaults(c);
+  memcpy(c.wifi_ssid, v4.wifi_ssid, sizeof(c.wifi_ssid));
+  memcpy(c.wifi_pass, v4.wifi_pass, sizeof(c.wifi_pass));
+  memcpy(c.tci_host,  v4.tci_host,  sizeof(c.tci_host));
+  c.tci_port    = v4.tci_port;
+  c.iaru_region = v4.iaru_region;
+  c.radio_type  = v4.radio_type;
+  memcpy(c.hostname, v4.hostname, sizeof(c.hostname));
+  memcpy(c.ota_pass, v4.ota_pass, sizeof(c.ota_pass));
+  c.guard_ms = v4.guard_ms;
+  memcpy(c.band_relay, v4.band_relay, sizeof(c.band_relay));
+  c.mode             = v4.mode;
+  memcpy(c.peer_host, v4.peer_host, sizeof(c.peer_host));
+  c.interlock_policy = v4.interlock_policy;
+  c.on_peer_loss     = v4.on_peer_loss;
+  c.radio2_type      = v4.radio2_type;
+  memcpy(c.radio2_host, v4.radio2_host, sizeof(c.radio2_host));
+  c.radio2_port      = v4.radio2_port;
+  c.switch_type      = v4.switch_type;
+  return true;
+}
+
+// Returns true if a valid config was loaded (incl. a migrated v1..v4); false
 // if defaults were applied (blank/corrupt EEPROM → safe defaults, caller should
 // enter setup/AP mode).
 inline bool configLoad(Config& c) {
@@ -261,9 +327,9 @@ inline bool configLoad(Config& c) {
     clampConfig(c);
     return true;
   }
-  if (configMigrateV3(c) || configMigrateV2(c) || configMigrateV1(c)) {
+  if (configMigrateV4(c) || configMigrateV3(c) || configMigrateV2(c) || configMigrateV1(c)) {
     clampConfig(c);
-    configSave(c);                                 // persist as v4 (migrate once)
+    configSave(c);                                 // persist as v5 (migrate once)
     return true;
   }
   configDefaults(c);

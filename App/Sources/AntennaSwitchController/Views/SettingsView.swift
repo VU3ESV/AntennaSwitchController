@@ -40,6 +40,10 @@ struct SettingsView: View {
                 TextField("Host / IP", text: $vm.config.tciHost)
                 TextField("Port", value: $vm.config.tciPort, format: .number.grouping(.never))
                 if vm.config.radioType == .tci {
+                    Picker("Receiver", selection: $vm.config.radioRx) {
+                        Text("RX1").tag(0); Text("RX2").tag(1)
+                    }
+                    .pickerStyle(.segmented)
                     Picker("IARU Region", selection: $vm.config.region) {
                         Text("1").tag(1); Text("2").tag(2); Text("3").tag(3)
                     }
@@ -97,9 +101,17 @@ struct SettingsView: View {
                     }
                     TextField("Host / IP", text: $vm.config.radio2Host)
                     TextField("Port", value: $vm.config.radio2Port, format: .number.grouping(.never))
+                    if vm.config.radio2Type == .tci {
+                        Picker("Receiver", selection: $vm.config.radio2Rx) {
+                            Text("RX1").tag(0); Text("RX2").tag(1)
+                        }
+                        .pickerStyle(.segmented)
+                    }
                     Picker("External switch", selection: $vm.config.switchType) {
                         ForEach(SwitchType.allCases, id: \.self) { Text($0.label).tag($0) }
                     }
+                    Text("One 2-RX radio (e.g. SunSDR2): set radio 1 + radio 2 to the same Host/Port, radio 1 = RX1, radio 2 = RX2.")
+                        .font(.caption).foregroundStyle(.secondary)
                 }
             }
 

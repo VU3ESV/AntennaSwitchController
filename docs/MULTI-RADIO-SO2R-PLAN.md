@@ -62,6 +62,15 @@ A radio is **a source of "current band + TX state"**:
   so drivers stay tiny. The bundled TCI lib already has **two RTX slots** — handy
   for two TCI radios (shared or dual server, as in BPF).
 
+#### Multi-receiver radios (e.g. SunSDR2) — *implemented*
+A single radio with **two receivers** (SunSDR2 PRO, ExpertSDR multi-RX) exposes
+them over TCI as **two RTX slots** (`rtx[0]` = RX1, `rtx[1]` = RX2). `TciSource`
+takes a **receiver index** (`setRig(0|1)`), so Mode B drives such a radio as
+SO2R from **one board**: radio 1 and radio 2 point at the **same host/port**,
+radio 1 = RX1, radio 2 = RX2. Each `TciSource` opens its own TCI connection and
+reads its rig — verified working with two simultaneous clients on one SunSDR2
+(RX1 40 m → antenna A, RX2 10 m → antenna B). Config: `radio_rx` / `radio2_rx`.
+
 ### ⚠️ One hardware serial port per board
 The ESP-12F board has exactly **one usable UART** (UART0, GPIO1/3) — the relays
 occupy the other GPIOs and UART1/GPIO2 is TX-only. Therefore **a single board can
@@ -120,14 +129,12 @@ switch** (the RF matrix is the external switch; the controller is the brain).
   radios' bands + the interlock (trivial — one MCU sees both radios) and writes
   the 8 relays.
 - Radio connectivity is bounded by the **one-UART rule** (≤1 serial; see §2).
-- **Control-line budget (confirm — §10.1):** 8 direct relay lines drive the 8×2
-  switch per *its* wiring. A fully-independent "2 radios × exclusive 1-of-8"
-  matrix needs 2×8 = 16 unencoded lines, so an 8-line direct scheme implies the
-  switch is a **per-antenna A/B select** type (8 SPDT, one control line per
-  antenna: each antenna routed to Radio 1 **or** Radio 2). The firmware drives
-  exactly that: set Radio 1's chosen antenna line to "1", Radio 2's to "2",
-  interlock guaranteeing they differ. (If your switch instead expects 2×4-bit
-  BCD, we add a BCD output map — but that is not "direct".)
+- **Confirmed wiring (§10.1):** **relay _i_ = antenna _i_**, and the relay for
+  **each receiver's selected antenna is energized** — so **up to two relays are
+  HIGH at once** (one per radio), the switch routing each energized antenna to
+  its radio. The interlock guarantees the two are different antennas, so the two
+  radios never share one. If both radios resolve to the same antenna, first-come
+  keeps it with one radio and the other gets none (one relay HIGH).
 
 ---
 
@@ -318,11 +325,13 @@ Same ESP8266 sketch; the mode selects the topology.
 
 ## 10. Open questions (confirm before P2)
 
-1. ~~**Mode B 8×2 control lines**~~ **CONFIRMED:** the 8 relays wire directly and
-   each line selects **one antenna → Radio 1 or Radio 2** (per-antenna A/B,
-   **8× SPDT**). `Relay8x2` drives relay _i_ = antenna _i_: de-energized routes
-   antenna _i_ to Radio 1, energized routes it to Radio 2 (interlock guarantees
-   the two radios never resolve to the same antenna).
+1. ~~**Mode B 8×2 control lines**~~ **CONFIRMED (hardware-verified):** relay _i_
+   = antenna _i_, and the relay for **each receiver's antenna is energized** —
+   **up to two relays HIGH at once** (one per radio), the switch routing each
+   energized antenna to its radio. `Relay8x2` drives the set {Radio 1 antenna,
+   Radio 2 antenna} with per-line break-before-make; the interlock keeps the two
+   distinct (both want the same → first-come, one relay HIGH). *(The earlier
+   "8× SPDT, one relay" A/B assumption was wrong — corrected after live test.)*
 2. **Mode A 1×2 switches** — confirm a per-band/per-antenna 1×2 switch for
    isolation, and how it's wired/driven (passive, or driven by the same relay
    index on each board).
