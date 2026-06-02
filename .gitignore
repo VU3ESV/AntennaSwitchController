@@ -6,6 +6,9 @@
 App/dist/
 *.swiftpm
 
+# XcodeGen-generated project for the plugin .appex (regenerate with xcodegen)
+App/Xcode/*.xcodeproj/
+
 # Generated icon staging (regenerate with App/Resources/make-icon.swift); keep the .icns
 App/Resources/AppIcon.iconset/
 
