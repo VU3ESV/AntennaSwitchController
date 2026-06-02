@@ -7,12 +7,16 @@ import RadioPluginKit
 /// private to the module.
 @MainActor
 public final class AntennaSwitchPlugin: RadioPlugin {
-    public static let metadata = PluginMetadata(
+    public static let manifest: RadioPluginManifest? = RadioPluginManifest(
         id: "antsw",
-        title: "Antenna Switch",
+        name: "Antenna Switch",
+        version: "1.0",
+        isolation: .inProcess,                       // first-party, linked into the host
+        capabilities: [.networkClient, .bonjour],
         systemImage: "antenna.radiowaves.left.and.right",
-        version: "1.0"
+        author: "VU3ESV"
     )
+    public static var metadata: PluginMetadata { manifest!.metadata }
 
     private let host: PluginHost
     private let store: ControllersStore

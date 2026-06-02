@@ -18,7 +18,7 @@ let package = Package(
     dependencies: [
         // Published contract, same Git URL the container resolves, so every chain
         // resolves one identical RadioPluginKit (no path-vs-URL identity clash).
-        .package(url: "https://github.com/VU3ESV/RadioPluginKit.git", from: "1.0.0"),
+        .package(url: "https://github.com/VU3ESV/RadioPluginKit.git", from: "1.2.0"),
     ],
     targets: [
         .target(
