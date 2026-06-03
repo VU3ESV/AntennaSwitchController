@@ -51,12 +51,26 @@ struct SettingsView: View {
                 }
             }
 
+            Section("Relay Names") {
+                ForEach(0..<kRelayCount, id: \.self) { r in
+                    HStack {
+                        Text("R\(r + 1)")
+                            .font(.callout.monospacedDigit())
+                            .frame(width: 32, alignment: .leading)
+                            .foregroundStyle(.secondary)
+                        TextField("R\(r + 1) (GPIO\(kRelayGPIO[r]))", text: relayNameBinding(r))
+                    }
+                }
+                Text("Name each relay’s antenna (e.g. “80m Dipole”). Blank uses “R<n>”. Shown on the dashboard, controls, and band map.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+
             Section("Band → Relay Map") {
                 ForEach(Band.allCases) { band in
                     Picker(band.label, selection: relayBinding(for: band.rawValue)) {
                         Text("None / bypass").tag(-1)
                         ForEach(0..<kRelayCount, id: \.self) { r in
-                            Text("Relay \(r + 1) (GPIO\(kRelayGPIO[r]))").tag(r)
+                            Text("\(vm.config.relayLabel(r)) (GPIO\(kRelayGPIO[r]))").tag(r)
                         }
                     }
                 }
@@ -156,6 +170,14 @@ struct SettingsView: View {
         Binding(
             get: { index < vm.config.bands.count ? vm.config.bands[index] : -1 },
             set: { if index < vm.config.bands.count { vm.config.bands[index] = $0 } }
+        )
+    }
+
+    /// Two-way binding into the `relayNames` array element for one relay index.
+    private func relayNameBinding(_ r: Int) -> Binding<String> {
+        Binding(
+            get: { r < vm.config.relayNames.count ? vm.config.relayNames[r] : "" },
+            set: { if r < vm.config.relayNames.count { vm.config.relayNames[r] = $0 } }
         )
     }
 }

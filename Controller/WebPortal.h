@@ -83,6 +83,12 @@ class WebPortal {
     return o;
   }
 
+  // Display label for a relay: the operator's name if set, else "Relay N".
+  static String relayLabel(const Config& c, int r) {
+    if (c.relay_name[r][0]) return esc(c.relay_name[r]);
+    return "Relay " + String(r + 1);
+  }
+
   void handleRoot() {
     Config& c = *cfg_;
     String h;
@@ -126,13 +132,24 @@ class WebPortal {
       h += "<option value=" + String(r) + (c.iaru_region == r ? " selected" : "") + ">" + String(r) + "</option>";
     h += F("</select></fieldset>");
 
+    // --- relay (antenna) names ---
+    h += F("<fieldset><legend>Relay names</legend>"
+           "<p class=muted>Name each relay's antenna (e.g. \"80m Dipole\"). "
+           "Blank uses the default \"Relay N\". Shown in the app and the band map below.</p><table>");
+    for (int r = 0; r < NUM_RELAYS; r++) {
+      h += "<tr><td><b>R" + String(r + 1) + "</b> <span class=muted>(GPIO" + String(kRelayPin[r]) + ")</span></td>"
+           "<td><input name=rn" + String(r) + " maxlength=15 value=\"" + esc(c.relay_name[r]) +
+           "\" placeholder=\"Relay " + String(r + 1) + "\"></td></tr>";
+    }
+    h += F("</table></fieldset>");
+
     h += F("<fieldset><legend>Band &rarr; Relay map</legend><table>");
     for (int b = 0; b < NUM_BANDS; b++) {
       h += "<tr><td><b>" + String(bandName(b)) + "</b></td><td><select name=b" + String(b) + ">";
       h += "<option value=-1" + String(c.band_relay[b] == -1 ? " selected" : "") + ">None / bypass</option>";
       for (int r = 0; r < NUM_RELAYS; r++)
         h += "<option value=" + String(r) + (c.band_relay[b] == r ? " selected" : "") +
-             ">Relay " + String(r + 1) + " (GPIO" + String(kRelayPin[r]) + ")</option>";
+             ">" + relayLabel(c, r) + " (GPIO" + String(kRelayPin[r]) + ")</option>";
       h += F("</select></td></tr>");
     }
     h += F("</table><p class=muted>Multiple bands may share one relay. "
@@ -193,7 +210,8 @@ class WebPortal {
            "<form method=POST action='/relay?set=none'><button>All off</button></form>"
            "</div><div class=row>");
     for (int r = 0; r < NUM_RELAYS; r++)
-      h += "<form method=POST action='/relay?set=" + String(r) + "'><button>R" + String(r + 1) + "</button></form>";
+      h += "<form method=POST action='/relay?set=" + String(r) + "'><button>" +
+           (c.relay_name[r][0] ? esc(c.relay_name[r]) : "R" + String(r + 1)) + "</button></form>";
     h += F("</div></fieldset>");
 
     h += F("<form method=POST action=/reboot onsubmit=\"return confirm('Reboot?')\">"
@@ -235,6 +253,10 @@ class WebPortal {
       String key = "b" + String(b);
       if (server_.hasArg(key))
         c.band_relay[b] = (int8_t)constrain(server_.arg(key).toInt(), -1, NUM_RELAYS - 1);
+    }
+    for (int r = 0; r < NUM_RELAYS; r++) {
+      String key = "rn" + String(r);
+      copyArg(key.c_str(), c.relay_name[r], RELAY_NAME_LEN, false);  // "" clears → default Rn
     }
     configSave(c);
     if (saveFn_) saveFn_();
@@ -289,6 +311,12 @@ class WebPortal {
     j += "\"radio2_rx\":"   + String(c.radio2_rx) + ",";
     j += "\"region\":"      + String(c.iaru_region) + ",";
     j += "\"guard_ms\":"    + String(c.guard_ms) + ",";
+    j += "\"relay_names\":[";
+    for (int r = 0; r < NUM_RELAYS; r++) {
+      if (r) j += ",";
+      j += "\"" + esc(c.relay_name[r]) + "\"";
+    }
+    j += "],";
     j += "\"bands\":[";
     for (int b = 0; b < NUM_BANDS; b++) {
       if (b) j += ",";

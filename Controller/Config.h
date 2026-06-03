@@ -15,8 +15,15 @@
 #define CFG_MAGIC_V2 0x414E5432UL  // "ANT2" — v2: adds radio_type
 #define CFG_MAGIC_V3 0x414E5433UL  // "ANT3" — v3: adds SO2R mode/peer/interlock
 #define CFG_MAGIC_V4 0x414E5434UL  // "ANT4" — v4: adds radio 2 + switch_type (Mode B)
-#define CFG_MAGIC    0x414E5435UL  // "ANT5" — v5: adds per-radio TCI receiver index
-#define EEPROM_SIZE  512
+#define CFG_MAGIC_V5 0x414E5435UL  // "ANT5" — v5: adds per-radio TCI receiver index
+#define CFG_MAGIC    0x414E5436UL  // "ANT6" — v6: adds per-relay names
+#define EEPROM_SIZE  1024          // grew past 512 with relay names; ESP8266
+                                   // reserves a 4 KB flash sector regardless
+
+#ifndef NUM_RELAYS
+#define NUM_RELAYS 8               // matches OutputStage.h (relays 0..7)
+#endif
+#define RELAY_NAME_LEN 16          // per-relay display name (15 chars + null)
 
 // Radio transport for a radio source.
 enum RadioType : uint8_t { RADIO_TCI = 0, RADIO_FLEX = 1 };
@@ -69,7 +76,35 @@ struct Config {
   uint8_t  switch_type;          // SwitchType: 0=8x1, 1=8x2 (dual)
   uint8_t  radio_rx;             // radio 1 TCI receiver index (0=RX1, 1=RX2)
   uint8_t  radio2_rx;            // radio 2 TCI receiver index (0=RX1, 1=RX2)
+  char     relay_name[NUM_RELAYS][RELAY_NAME_LEN];  // per-relay name ("" = default Rn)
   uint32_t crc;                  // CRC32 over all preceding bytes
+};
+
+// Frozen v5 layout — migrate v5 saved configs (per-radio rx, no relay names).
+// DO NOT edit: must match exactly what shipped at the v5 bump.
+struct ConfigV5 {
+  uint32_t magic;
+  char     wifi_ssid[33];
+  char     wifi_pass[65];
+  char     tci_host[64];
+  uint16_t tci_port;
+  uint8_t  iaru_region;
+  uint8_t  radio_type;
+  char     hostname[33];
+  char     ota_pass[33];
+  uint16_t guard_ms;
+  int8_t   band_relay[NUM_BANDS];
+  uint8_t  mode;
+  char     peer_host[64];
+  uint8_t  interlock_policy;
+  uint8_t  on_peer_loss;
+  uint8_t  radio2_type;
+  char     radio2_host[64];
+  uint16_t radio2_port;
+  uint8_t  switch_type;
+  uint8_t  radio_rx;
+  uint8_t  radio2_rx;
+  uint32_t crc;
 };
 
 // Frozen v4 layout — migrate v4 saved configs (radio 2 + switch_type, no rx).
@@ -207,6 +242,7 @@ inline void clampConfig(Config& c) {
   if (c.switch_type > SWITCH_8X2)      c.switch_type      = SWITCH_8X1;
   if (c.radio_rx  > 1)                 c.radio_rx         = 0;
   if (c.radio2_rx > 1)                 c.radio2_rx        = 0;
+  for (int i = 0; i < NUM_RELAYS; i++) c.relay_name[i][RELAY_NAME_LEN - 1] = '\0';
 }
 
 // Migrate a v1 image (no radio_type, no mode) into v3. configDefaults() supplies
@@ -316,7 +352,41 @@ inline bool configMigrateV4(Config& c) {
   return true;
 }
 
-// Returns true if a valid config was loaded (incl. a migrated v1..v4); false
+// Migrate a v5 image (per-radio rx, no relay names) into v6 — keeps everything;
+// the new per-relay names default to "" (the app/web shows Rn for a blank name).
+inline bool configMigrateV5(Config& c) {
+  ConfigV5 v5;
+  EEPROM.begin(EEPROM_SIZE);
+  EEPROM.get(0, v5);
+  EEPROM.end();
+  if (v5.magic != CFG_MAGIC_V5) return false;
+  if (crc32(reinterpret_cast<const uint8_t*>(&v5), offsetof(ConfigV5, crc)) != v5.crc) return false;
+
+  configDefaults(c);                                // zeroes relay_name (blank)
+  memcpy(c.wifi_ssid, v5.wifi_ssid, sizeof(c.wifi_ssid));
+  memcpy(c.wifi_pass, v5.wifi_pass, sizeof(c.wifi_pass));
+  memcpy(c.tci_host,  v5.tci_host,  sizeof(c.tci_host));
+  c.tci_port    = v5.tci_port;
+  c.iaru_region = v5.iaru_region;
+  c.radio_type  = v5.radio_type;
+  memcpy(c.hostname, v5.hostname, sizeof(c.hostname));
+  memcpy(c.ota_pass, v5.ota_pass, sizeof(c.ota_pass));
+  c.guard_ms = v5.guard_ms;
+  memcpy(c.band_relay, v5.band_relay, sizeof(c.band_relay));
+  c.mode             = v5.mode;
+  memcpy(c.peer_host, v5.peer_host, sizeof(c.peer_host));
+  c.interlock_policy = v5.interlock_policy;
+  c.on_peer_loss     = v5.on_peer_loss;
+  c.radio2_type      = v5.radio2_type;
+  memcpy(c.radio2_host, v5.radio2_host, sizeof(c.radio2_host));
+  c.radio2_port      = v5.radio2_port;
+  c.switch_type      = v5.switch_type;
+  c.radio_rx         = v5.radio_rx;
+  c.radio2_rx        = v5.radio2_rx;
+  return true;
+}
+
+// Returns true if a valid config was loaded (incl. a migrated v1..v5); false
 // if defaults were applied (blank/corrupt EEPROM → safe defaults, caller should
 // enter setup/AP mode).
 inline bool configLoad(Config& c) {
@@ -327,9 +397,10 @@ inline bool configLoad(Config& c) {
     clampConfig(c);
     return true;
   }
-  if (configMigrateV4(c) || configMigrateV3(c) || configMigrateV2(c) || configMigrateV1(c)) {
+  if (configMigrateV5(c) || configMigrateV4(c) || configMigrateV3(c) ||
+      configMigrateV2(c) || configMigrateV1(c)) {
     clampConfig(c);
-    configSave(c);                                 // persist as v5 (migrate once)
+    configSave(c);                                 // persist as v6 (migrate once)
     return true;
   }
   configDefaults(c);

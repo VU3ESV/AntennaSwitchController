@@ -125,7 +125,7 @@ at power-up, and SHOULD prefer GPIO14/12/13/4/5 for the most-used bands.
   | `/`        | GET    | Config form: WiFi, TCI host/port, band→relay map, manual override |
   | `/save`    | POST   | Persist settings                                 |
   | `/status`  | GET    | JSON: current band, active relay, TCI/WiFi/TX/Tune, mode |
-  | `/config`  | GET    | JSON: stored settings (band→relay map, radio_type, radio host/port, receiver index, mode/peer/interlock, radio2_*, switch_type, region, hostname, guard, SSID — **never** passwords) for the macOS app |
+  | `/config`  | GET    | JSON: stored settings (band→relay map, relay names, radio_type, radio host/port, receiver index, mode/peer/interlock, radio2_*, switch_type, region, hostname, guard, SSID — **never** passwords) for the macOS app |
   | `/relay`   | POST   | Manual override: `set=auto\|none\|0..7`          |
   | `/discover`| GET    | Device identity + mDNS metadata + firmware version |
   | `/reboot`  | POST   | Soft reboot                                      |
@@ -234,7 +234,10 @@ RTX.h RTX.cpp      bundled IW7DMH RTX state (band edges, VFO/TRX/tune getters)
 > **per-radio TCI receiver index** (`radio_rx`/`radio2_rx`) drives a 2-receiver
 > radio (SunSDR2) as SO2R from one board (both radios → same host/port, RX1/RX2).
 > Config grew through v5; app gains Radio 2 + receiver pickers + dual dashboard.
-> **Live-validated on a SunSDR2 + the 8×2 wiring.**
+> **Live-validated on a SunSDR2 + the 8×2 wiring.** **P2c** added **per-relay
+> names** (config v6, `relay_name[8]`): operator-set antenna labels exposed via
+> `/config`+`/save`, shown across the web UI and app instead of "R1–R8" (blank →
+> default "R<n>"); v5→v6 migration preserves all settings.
 
 ## 6. Confirmed decisions
 

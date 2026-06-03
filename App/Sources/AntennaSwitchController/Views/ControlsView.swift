@@ -8,6 +8,19 @@ struct ControlsView: View {
 
     private let columns = [GridItem(.adaptive(minimum: 96), spacing: 10)]
 
+    /// Human summary of which relay(s) are energized — two in dual mode (one per
+    /// radio), one otherwise.
+    private func energizedSummary(_ s: DeviceStatus) -> String {
+        if s.energizedRelays.isEmpty { return "No relay energized." }
+        if s.isDual {
+            let r1 = s.radio1RelayIndex, r2 = s.radio2RelayIndex ?? -1
+            let a = r1 >= 0 ? vm.config.relayLabel(r1) : "none"
+            let b = r2 >= 0 ? vm.config.relayLabel(r2) : "none"
+            return "Radio 1 → \(a) · Radio 2 → \(b)  (both energized)."
+        }
+        return "\(vm.config.relayLabel(s.activeRelay)) energized."
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Manual Override").font(.headline).foregroundStyle(theme.textPrimary)
@@ -27,13 +40,22 @@ struct ControlsView: View {
                 .disabled(vm.status?.activeRelay == -1 && vm.status?.isAuto == false)
             }
 
+            // Mode B: a manual override drives Radio 1 only; Radio 2 stays automatic.
+            if vm.status?.isDual == true {
+                Text("Mode B: override applies to **Radio 1**; Radio 2 keeps tracking its band automatically.")
+                    .font(.caption).foregroundStyle(theme.textSecondary)
+            }
+
             LazyVGrid(columns: columns, spacing: 10) {
                 ForEach(0..<kRelayCount, id: \.self) { r in
-                    let active = vm.status?.activeRelay == r
+                    let active = vm.status?.energizedRelays.contains(r) ?? false
+                    let named = r < vm.config.relayNames.count && !vm.config.relayNames[r].isEmpty
                     Button { Task { await vm.setRelay(String(r)) } } label: {
                         VStack(spacing: 2) {
-                            Text("R\(r + 1)").font(.headline)
-                            Text("GPIO\(kRelayGPIO[r])").font(.caption2).foregroundStyle(theme.textSecondary)
+                            Text(vm.config.relayLabel(r)).font(.headline)
+                                .lineLimit(1).minimumScaleFactor(0.6)
+                            Text(named ? "R\(r + 1) · GPIO\(kRelayGPIO[r])" : "GPIO\(kRelayGPIO[r])")
+                                .font(.caption2).foregroundStyle(theme.textSecondary)
                         }
                         .frame(maxWidth: .infinity).padding(.vertical, 10)
                     }
@@ -43,9 +65,7 @@ struct ControlsView: View {
             }
 
             if let s = vm.status {
-                Text(s.activeRelay < 0
-                     ? "No relay energized."
-                     : "Relay R\(s.activeRelay + 1) energized.")
+                Text(energizedSummary(s))
                     .font(.callout).foregroundStyle(theme.textSecondary)
             }
 

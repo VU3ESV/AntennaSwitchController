@@ -182,7 +182,14 @@ String statusJson() {
   // In dual mode the energized relay is Radio 2's antenna; expose both.
   int activeRelay = (g_cfg.mode == MODE_DUAL) ? g_dual.radio2Ant() : g_out.activeRelay();
   bool sw         = (g_cfg.mode == MODE_DUAL) ? g_dual.switching()  : g_out.switching();
-  j += "\"active_relay\":" + String(activeRelay) + ",";           // -1 = none
+  j += "\"active_relay\":" + String(activeRelay) + ",";           // -1 = none (legacy)
+  // Explicit per-radio energized relays (-1 = none). In dual mode BOTH are live
+  // (one per radio); single modes use only radio1_relay. Prefer these over
+  // active_relay, which for back-compat still reports radio 2's antenna in dual.
+  int r1Relay = (g_cfg.mode == MODE_DUAL) ? g_dual.radio1Ant() : g_out.activeRelay();
+  int r2Relay = (g_cfg.mode == MODE_DUAL) ? g_dual.radio2Ant() : -1;
+  j += "\"radio1_relay\":" + String(r1Relay) + ",";
+  j += "\"radio2_relay\":" + String(r2Relay) + ",";
   j += "\"switching\":"    + String(sw ? 1 : 0) + ",";
   if (g_cfg.mode == MODE_DUAL) {
     j += "\"relay_mask\":" + String(g_dual.energizedMask()) + ",";  // bits of HIGH relays

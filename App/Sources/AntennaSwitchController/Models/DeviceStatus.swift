@@ -52,7 +52,9 @@ struct DeviceStatus: Codable, Equatable {
     let tx: Int
     let tune: Int
     let overrideMode: Int    // -2 = auto/TCI, -1 = forced none, 0..7 = forced relay
-    let activeRelay: Int     // -1 = none energized, else 0..7
+    let activeRelay: Int     // -1 = none energized, else 0..7 (legacy; = radio 2 in dual)
+    var radio1Relay: Int? = nil   // explicit per-radio energized relay (nil = older fw)
+    var radio2Relay: Int? = nil   // dual only; -1 = none, nil = not dual / older fw
     let switching: Int
     let interlock: InterlockStatus?   // absent on pre-P2b firmware
     let radio2: Radio2Status?         // present only in Mode B (dual)
@@ -61,6 +63,8 @@ struct DeviceStatus: Codable, Equatable {
         case ap, wifi, ip, tci, freq, band, tx, tune, switching, interlock, radio2
         case overrideMode = "override"
         case activeRelay = "active_relay"
+        case radio1Relay = "radio1_relay"
+        case radio2Relay = "radio2_relay"
     }
 
     var apMode: Bool       { ap != 0 }
@@ -70,6 +74,28 @@ struct DeviceStatus: Codable, Equatable {
     var tuning: Bool       { tune != 0 }
     var isSwitching: Bool  { switching != 0 }
     var isAuto: Bool       { overrideMode == -2 }
+    var isDual: Bool       { interlock?.isDual == true }
+
+    /// Radio 1's energized relay index (-1 = none). Prefers the explicit
+    /// `radio1_relay`, falling back for older firmware (interlock in dual, else
+    /// `active_relay`).
+    var radio1RelayIndex: Int {
+        radio1Relay ?? (isDual ? (interlock?.masterAnt ?? -1) : activeRelay)
+    }
+
+    /// Radio 2's energized relay index in dual mode (-1 = none); nil when not dual.
+    var radio2RelayIndex: Int? {
+        if let r = radio2Relay { return r >= 0 ? r : -1 }
+        return isDual ? (interlock?.slaveAnt ?? -1) : nil
+    }
+
+    /// All currently energized relay indices — one normally, up to two in dual.
+    var energizedRelays: [Int] {
+        var out: [Int] = []
+        let r1 = radio1RelayIndex; if r1 >= 0 { out.append(r1) }
+        if let r2 = radio2RelayIndex, r2 >= 0 { out.append(r2) }
+        return out
+    }
 
     /// Frequency formatted as MHz, or "—" when unknown.
     var freqMHz: String {

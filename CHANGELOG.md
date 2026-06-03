@@ -12,6 +12,14 @@ work. See the [GitHub Releases] for downloads.
 
 ## [Unreleased]
 ### Added
+- **Per-relay (antenna) names.** Name each relay — e.g. "80m Dipole", "Hexbeam" —
+  in the app's Settings or the controller's web page. The names replace the
+  generic "R1–R8" everywhere (dashboard active relay, controls buttons, band→relay
+  map, manual-override buttons, and the dual-mode interlock badges, now "Radio 1 →
+  80m Dipole"), removing the clash with the radio's own RX1/RX2 receiver labels.
+  Stored on the controller in EEPROM (config **v6**, exposed via `/config` +
+  `/save`); a blank name falls back to "R<n>". v5→v6 migration preserves all
+  existing settings.
 - **Single shared TCI client in Mode B (dual)** — when both radios are TCI on the
   *same* `host:port` (a SunSDR2's two receivers, RX1/RX2), the controller reads
   both receivers from **one** WebSocket instead of opening a redundant second one
