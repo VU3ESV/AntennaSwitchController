@@ -11,14 +11,22 @@ struct ControlsView: View {
     /// Human summary of which relay(s) are energized — two in dual mode (one per
     /// radio), one otherwise.
     private func energizedSummary(_ s: DeviceStatus) -> String {
-        if s.energizedRelays.isEmpty { return "No relay energized." }
-        if s.isDual {
-            let r1 = s.radio1RelayIndex, r2 = s.radio2RelayIndex ?? -1
-            let a = r1 >= 0 ? vm.config.relayLabel(r1) : "none"
-            let b = r2 >= 0 ? vm.config.relayLabel(r2) : "none"
-            return "Radio 1 → \(a) · Radio 2 → \(b)  (both energized)."
+        // One leg per radio: "Radio 1 → 80m Dipole (auto)", or "Radio 1 off (manual)".
+        func leg(_ radio: String, _ idx: Int, _ mode: String) -> String {
+            idx >= 0 ? "\(radio) → \(vm.config.relayLabel(idx)) (\(mode))"
+                     : "\(radio) off (\(mode))"
         }
-        return "\(vm.config.relayLabel(s.activeRelay)) energized."
+        // The manual override applies to Radio 1: -2 auto, -1 off, 0..7 a relay.
+        let r1Mode = s.overrideMode == -2 ? "auto" : "manual"
+        if s.isDual {
+            return leg("Radio 1", s.radio1RelayIndex, r1Mode) + "   ·   "
+                 + leg("Radio 2", s.radio2RelayIndex ?? -1, "auto")
+        }
+        if s.activeRelay < 0 {
+            return s.overrideMode == -1 ? "Manually off — no antenna connected."
+                                        : "No antenna connected (auto)."
+        }
+        return "\(vm.config.relayLabel(s.activeRelay)) energized (\(r1Mode))."
     }
 
     var body: some View {
@@ -35,9 +43,11 @@ struct ControlsView: View {
                 .disabled(vm.status?.isAuto == true)
 
                 Button { Task { await vm.setRelay("none") } } label: {
-                    Label("All Off", systemImage: "poweroff")
+                    Label(vm.status?.isDual == true ? "Radio 1 Off" : "All Off", systemImage: "poweroff")
                 }
-                .disabled(vm.status?.activeRelay == -1 && vm.status?.isAuto == false)
+                .buttonStyle(.bordered).tint(theme.danger)
+                // Greyed when it's the current state (manual off), mirroring Auto.
+                .disabled(vm.status?.overrideMode == -1)
             }
 
             // Mode B: a manual override drives Radio 1 only; Radio 2 stays automatic.
