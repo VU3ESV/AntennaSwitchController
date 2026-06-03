@@ -28,6 +28,16 @@ struct DashboardContent: View {
         return "\(vm.config.relayLabel(idx)) (GPIO\(kRelayGPIO[idx]))"
     }
 
+    @ViewBuilder
+    private func contentionBadge(bandLabel: String, granted: Int) -> some View {
+        switch AntennaContention.evaluate(bandLabel: bandLabel, granted: granted,
+                                          bands: vm.config.bands, fallback: vm.config.bands2) {
+        case .onFallback: StatusBadge("On fallback", kind: .warning)
+        case .blocked:    StatusBadge("Primary busy", kind: .danger)
+        case .none:       EmptyView()
+        }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
                 if let err = vm.errorMessage, !vm.connected {
@@ -58,6 +68,8 @@ struct DashboardContent: View {
                         StatusBadge("TX", kind: s.transmitting ? .danger : .neutral)
                         StatusBadge("Tune", kind: s.tuning ? .warning : .neutral)
                         if s.isSwitching { StatusBadge("Switching", kind: .neutral) }
+                        // SO2R: flag when this radio lost its primary to the other.
+                        contentionBadge(bandLabel: s.band, granted: r1Relay)
                     }
 
                     // SO2R interlock (hidden for standalone units). For Mode A the
@@ -93,6 +105,7 @@ struct DashboardContent: View {
                         HStack(spacing: 10) {
                             StatusBadge("Radio 2 TCI", kind: r2.tciUp ? .success : .neutral)
                             StatusBadge("Radio 2 TX", kind: r2.transmitting ? .danger : .neutral)
+                            contentionBadge(bandLabel: r2.band, granted: r2Relay)
                         }
                     }
 

@@ -25,6 +25,11 @@ work. See the [GitHub Releases] for downloads.
   all settings. App + web band map gain a "Fallback" column (shown only for SO2R
   modes). **Live-validated** on the two-board Mode A pair. See
   [docs/MULTI-RADIO-SO2R-PLAN.md §11](docs/MULTI-RADIO-SO2R-PLAN.md).
+- **SO2R contention indicator** in the app dashboard. When a radio loses its
+  band's primary antenna to the other radio, its card shows an **"On fallback"**
+  (amber) or **"Primary busy"** (red, no antenna free) badge — so the operator
+  can see *why* a radio is on a different antenna or none. Derived entirely from
+  `/status` + `/config` (no firmware change); standalone units never show it.
 - **Test infrastructure** for the SO2R decision logic (plan §11.9): host unit
   tests of the resolvers (`Controller/test/`, real firmware headers + desktop
   shims, 48 assertions, no hardware) and a live integration suite (`App/Tests/`)
