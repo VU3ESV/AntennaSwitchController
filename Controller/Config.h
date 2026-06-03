@@ -18,8 +18,8 @@
 #define CFG_MAGIC_V5 0x414E5435UL  // "ANT5" — v5: adds per-radio TCI receiver index
 #define CFG_MAGIC_V6 0x414E5436UL  // "ANT6" — v6: adds per-relay names
 #define CFG_MAGIC_V7 0x414E5437UL  // "ANT7" — v7: adds per-band secondary (fallback) relay
-#define CFG_MAGIC    0x414E5438UL  // "ANT8" — v8: adds per-relay antenna metadata
-                                   //              (band coverage + feed type + group)
+#define CFG_MAGIC_V8 0x414E5438UL  // "ANT8" — v8: adds per-relay antenna metadata
+#define CFG_MAGIC    0x414E5439UL  // "ANT9" — v9: adds serial-CAT (baud + CI-V addr)
 #define EEPROM_SIZE  1024          // grew past 512 with relay names; ESP8266
                                    // reserves a 4 KB flash sector regardless
 
@@ -35,7 +35,17 @@
 enum FeedType : uint8_t { FEED_SINGLE = 0, FEED_TRIPLEXED = 1 };
 
 // Radio transport for a radio source.
-enum RadioType : uint8_t { RADIO_TCI = 0, RADIO_FLEX = 1 };
+//   TCI / FLEX  — network (WiFi); no extra hardware.
+//   CAT_*       — read-only serial CAT on UART0 (P1; one serial radio per board,
+//                 see docs/HARDWARE.md §3). Kenwood and modern Yaesu share the
+//                 ASCII `IF;` poll; Icom is CI-V binary. Radio 2 is never serial.
+enum RadioType : uint8_t {
+  RADIO_TCI = 0, RADIO_FLEX = 1,
+  RADIO_CAT_KENWOOD = 2,   // Kenwood / Elecraft (TS-590/890, K3/K4): "IF;"
+  RADIO_CAT_ICOM    = 3,   // Icom CI-V (IC-7300/9700/705/7610)
+  RADIO_CAT_YAESU   = 4,   // modern Yaesu (FT-991A / FT-DX10): "IF;"
+};
+inline bool radioTypeIsSerial(uint8_t t) { return t >= RADIO_CAT_KENWOOD && t <= RADIO_CAT_YAESU; }
 
 // SO2R role of this unit (docs/MULTI-RADIO-SO2R-PLAN.md §3).
 //   STANDALONE — single-radio 8×1 (default).
@@ -93,7 +103,41 @@ struct Config {
   uint8_t  relay_feed[NUM_RELAYS];  // FeedType per relay (single / triplexed)
   uint8_t  relay_group[NUM_RELAYS]; // 0 = none; else a group id shared by the legs
                                  // of one triplexed physical antenna
+  uint32_t cat_baud;             // radio 1 serial-CAT baud (RADIO_CAT_*); else unused
+  uint8_t  civ_addr;             // radio 1 Icom CI-V address (RADIO_CAT_ICOM)
   uint32_t crc;                  // CRC32 over all preceding bytes
+};
+
+// Frozen v8 layout — migrate v8 saved configs (antenna metadata, no serial CAT).
+// DO NOT edit: must match exactly what shipped at the v8 bump.
+struct ConfigV8 {
+  uint32_t magic;
+  char     wifi_ssid[33];
+  char     wifi_pass[65];
+  char     tci_host[64];
+  uint16_t tci_port;
+  uint8_t  iaru_region;
+  uint8_t  radio_type;
+  char     hostname[33];
+  char     ota_pass[33];
+  uint16_t guard_ms;
+  int8_t   band_relay[NUM_BANDS];
+  uint8_t  mode;
+  char     peer_host[64];
+  uint8_t  interlock_policy;
+  uint8_t  on_peer_loss;
+  uint8_t  radio2_type;
+  char     radio2_host[64];
+  uint16_t radio2_port;
+  uint8_t  switch_type;
+  uint8_t  radio_rx;
+  uint8_t  radio2_rx;
+  char     relay_name[NUM_RELAYS][RELAY_NAME_LEN];
+  int8_t   band_relay2[NUM_BANDS];
+  uint16_t relay_bands[NUM_RELAYS];
+  uint8_t  relay_feed[NUM_RELAYS];
+  uint8_t  relay_group[NUM_RELAYS];
+  uint32_t crc;
 };
 
 // Frozen v7 layout — migrate v7 saved configs (fallback map, no antenna metadata).
@@ -299,6 +343,8 @@ inline void configDefaults(Config& c) {
   c.switch_type      = SWITCH_8X1;
   c.radio_rx         = 0;
   c.radio2_rx        = 0;
+  c.cat_baud         = 9600;      // common CAT default (Kenwood/Icom)
+  c.civ_addr         = 0x94;      // Icom default (IC-7300)
   defaultHostname(c.hostname, sizeof(c.hostname));
   for (int i = 0; i < NUM_BANDS; i++) { c.band_relay[i] = -1; c.band_relay2[i] = -1; }  // none
   c.crc = configCrc(c);
@@ -309,11 +355,12 @@ inline void clampConfig(Config& c) {
     if (c.band_relay[i]  < -1 || c.band_relay[i]  > 7) c.band_relay[i]  = -1;
     if (c.band_relay2[i] < -1 || c.band_relay2[i] > 7) c.band_relay2[i] = -1;
   }
-  if (c.radio_type > RADIO_FLEX)       c.radio_type       = RADIO_TCI;
+  if (c.radio_type > RADIO_CAT_YAESU)  c.radio_type       = RADIO_TCI;
   if (c.mode > MODE_DUAL)              c.mode             = MODE_STANDALONE;
   if (c.interlock_policy > ILK_PRIORITY) c.interlock_policy = ILK_FIRST_COME;
   if (c.on_peer_loss > PEER_LOSS_HOLD) c.on_peer_loss     = PEER_LOSS_SAFE;
-  if (c.radio2_type > RADIO_FLEX)      c.radio2_type      = RADIO_TCI;
+  if (c.radio2_type > RADIO_FLEX)      c.radio2_type      = RADIO_TCI;  // radio 2 never serial
+  if (c.cat_baud == 0 || c.cat_baud > 250000) c.cat_baud  = 9600;
   if (c.switch_type > SWITCH_8X2)      c.switch_type      = SWITCH_8X1;
   if (c.radio_rx  > 1)                 c.radio_rx         = 0;
   if (c.radio2_rx > 1)                 c.radio2_rx        = 0;
@@ -539,7 +586,46 @@ inline bool configMigrateV7(Config& c) {
   return true;
 }
 
-// Returns true if a valid config was loaded (incl. a migrated v1..v7); false
+// Migrate a v8 image (antenna metadata, no serial CAT) into v9 — keeps
+// everything; the new serial-CAT fields default (9600 baud, CI-V 0x94).
+inline bool configMigrateV8(Config& c) {
+  ConfigV8 v8;
+  EEPROM.begin(EEPROM_SIZE);
+  EEPROM.get(0, v8);
+  EEPROM.end();
+  if (v8.magic != CFG_MAGIC_V8) return false;
+  if (crc32(reinterpret_cast<const uint8_t*>(&v8), offsetof(ConfigV8, crc)) != v8.crc) return false;
+
+  configDefaults(c);                                // sets cat_baud / civ_addr defaults
+  memcpy(c.wifi_ssid, v8.wifi_ssid, sizeof(c.wifi_ssid));
+  memcpy(c.wifi_pass, v8.wifi_pass, sizeof(c.wifi_pass));
+  memcpy(c.tci_host,  v8.tci_host,  sizeof(c.tci_host));
+  c.tci_port    = v8.tci_port;
+  c.iaru_region = v8.iaru_region;
+  c.radio_type  = v8.radio_type;
+  memcpy(c.hostname, v8.hostname, sizeof(c.hostname));
+  memcpy(c.ota_pass, v8.ota_pass, sizeof(c.ota_pass));
+  c.guard_ms = v8.guard_ms;
+  memcpy(c.band_relay, v8.band_relay, sizeof(c.band_relay));
+  c.mode             = v8.mode;
+  memcpy(c.peer_host, v8.peer_host, sizeof(c.peer_host));
+  c.interlock_policy = v8.interlock_policy;
+  c.on_peer_loss     = v8.on_peer_loss;
+  c.radio2_type      = v8.radio2_type;
+  memcpy(c.radio2_host, v8.radio2_host, sizeof(c.radio2_host));
+  c.radio2_port      = v8.radio2_port;
+  c.switch_type      = v8.switch_type;
+  c.radio_rx         = v8.radio_rx;
+  c.radio2_rx        = v8.radio2_rx;
+  memcpy(c.relay_name, v8.relay_name, sizeof(c.relay_name));
+  memcpy(c.band_relay2, v8.band_relay2, sizeof(c.band_relay2));
+  memcpy(c.relay_bands, v8.relay_bands, sizeof(c.relay_bands));
+  memcpy(c.relay_feed,  v8.relay_feed,  sizeof(c.relay_feed));
+  memcpy(c.relay_group, v8.relay_group, sizeof(c.relay_group));
+  return true;
+}
+
+// Returns true if a valid config was loaded (incl. a migrated v1..v8); false
 // if defaults were applied (blank/corrupt EEPROM → safe defaults, caller should
 // enter setup/AP mode).
 inline bool configLoad(Config& c) {
@@ -550,11 +636,11 @@ inline bool configLoad(Config& c) {
     clampConfig(c);
     return true;
   }
-  if (configMigrateV7(c) || configMigrateV6(c) || configMigrateV5(c) ||
-      configMigrateV4(c) || configMigrateV3(c) || configMigrateV2(c) ||
-      configMigrateV1(c)) {
+  if (configMigrateV8(c) || configMigrateV7(c) || configMigrateV6(c) ||
+      configMigrateV5(c) || configMigrateV4(c) || configMigrateV3(c) ||
+      configMigrateV2(c) || configMigrateV1(c)) {
     clampConfig(c);
-    configSave(c);                                 // persist as v8 (migrate once)
+    configSave(c);                                 // persist as v9 (migrate once)
     return true;
   }
   configDefaults(c);

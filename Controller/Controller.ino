@@ -20,6 +20,7 @@
 #include "RadioSource.h"
 #include "TciSource.h"
 #include "FlexSource.h"
+#include "SerialCatSource.h"
 #include "Interlock.h"
 #include "WebPortal.h"
 
@@ -32,9 +33,10 @@ Relay8x2   g_dual;              // 8×2 per-antenna A/B select (Mode B)
 WebPortal  g_web;
 
 // Radio 1 sources; g_radio points at the one selected by cfg.radio_type.
-TciSource    g_tci;             // TCI (RX-1 VFO A)
-FlexSource   g_flex;            // FlexRadio SmartSDR (TCP 4992)
-RadioSource* g_radio = &g_tci;
+TciSource       g_tci;          // TCI (RX-1 VFO A)
+FlexSource      g_flex;         // FlexRadio SmartSDR (TCP 4992)
+SerialCatSource g_cat;          // serial CAT on UART0 (radio 1 only)
+RadioSource*    g_radio = &g_tci;
 
 // Radio 2 sources (Mode B only); g_radio2 selected by cfg.radio2_type.
 TciSource    g_tci2;
@@ -74,6 +76,13 @@ LinkDebounce g_link1, g_link2;
 void applyRadio() {
   g_radio->disconnect();
   g_tci.setRig(g_cfg.radio_rx);        // which TCI receiver (0=RX1, 1=RX2)
+  if (radioTypeIsSerial(g_cfg.radio_type)) {
+    // Serial CAT on UART0 — no host endpoint; takes over the console.
+    g_cat.setSerial(g_cfg.radio_type, g_cfg.cat_baud, g_cfg.civ_addr);
+    g_radio = (RadioSource*)&g_cat;
+    g_radio->connect();
+    return;
+  }
   g_radio = (g_cfg.radio_type == RADIO_FLEX) ? (RadioSource*)&g_flex
                                              : (RadioSource*)&g_tci;
   g_radio->configure(g_cfg.tci_host, g_cfg.tci_port, g_cfg.iaru_region);
@@ -286,6 +295,7 @@ void setupOTA() {
 }
 
 void handleSerial() {
+  if (radioTypeIsSerial(g_cfg.radio_type)) return;   // UART0 belongs to the CAT radio
   if (!Serial.available()) return;
   String line = Serial.readStringUntil('\n');
   line.trim();

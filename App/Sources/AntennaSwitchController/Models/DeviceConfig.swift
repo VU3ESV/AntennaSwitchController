@@ -8,21 +8,31 @@ import Foundation
 /// Which transport the controller uses to track the radio's band.
 /// Matches the firmware's `RadioType` enum (Config.h).
 enum RadioType: Int, Codable, CaseIterable {
-    case tci  = 0     // TCI server (ExpertSDR / SunSDR)
-    case flex = 1     // FlexRadio SmartSDR (TCP 4992)
+    case tci        = 0   // TCI server (ExpertSDR / SunSDR)
+    case flex       = 1   // FlexRadio SmartSDR (TCP 4992)
+    case catKenwood = 2   // serial CAT — Kenwood / Elecraft ("IF;")
+    case catIcom    = 3   // serial CAT — Icom CI-V
+    case catYaesu   = 4   // serial CAT — modern Yaesu ("IF;")
 
     var label: String {
         switch self {
-        case .tci:  return "TCI (ExpertSDR / SunSDR)"
-        case .flex: return "FlexRadio (SmartSDR TCP)"
+        case .tci:        return "TCI (ExpertSDR / SunSDR)"
+        case .flex:       return "FlexRadio (SmartSDR TCP)"
+        case .catKenwood: return "Serial CAT — Kenwood / Elecraft"
+        case .catIcom:    return "Serial CAT — Icom (CI-V)"
+        case .catYaesu:   return "Serial CAT — Yaesu (FT-991A/DX10)"
         }
     }
 
-    /// Conventional default port for this transport.
+    /// Read-only serial CAT on the board's UART (band tracking only, no TX state).
+    var isSerial: Bool { self == .catKenwood || self == .catIcom || self == .catYaesu }
+
+    /// Conventional default port for network transports (serial ignores it).
     var defaultPort: Int {
         switch self {
         case .tci:  return 50001
         case .flex: return 4992
+        default:    return 50001
         }
     }
 }
@@ -74,6 +84,8 @@ struct DeviceConfig: Codable, Equatable {
     var radioType: RadioType
     var tciHost: String
     var tciPort: Int
+    var catBaud: Int              // serial-CAT baud (radio 1, RADIO_CAT_*)
+    var civAddr: Int              // Icom CI-V address (radio 1)
     var region: Int
     var guardMs: Int
     var bands: [Int]              // 11 entries, -1 = none/bypass else relay 0..7
@@ -108,6 +120,8 @@ struct DeviceConfig: Codable, Equatable {
         case radioType = "radio_type"
         case tciHost = "tci_host"
         case tciPort = "tci_port"
+        case catBaud = "cat_baud"
+        case civAddr = "civ_addr"
         case guardMs = "guard_ms"
         case peerHost = "peer_host"
         case interlockPolicy = "interlock_policy"
@@ -149,6 +163,8 @@ struct DeviceConfig: Codable, Equatable {
         radioType = try c.decodeIfPresent(RadioType.self, forKey: .radioType) ?? .tci
         tciHost   = try c.decode(String.self, forKey: .tciHost)
         tciPort   = try c.decode(Int.self, forKey: .tciPort)
+        catBaud   = try c.decodeIfPresent(Int.self, forKey: .catBaud) ?? 9600    // pre-v9
+        civAddr   = try c.decodeIfPresent(Int.self, forKey: .civAddr) ?? 0x94
         region    = try c.decode(Int.self, forKey: .region)
         guardMs   = try c.decode(Int.self, forKey: .guardMs)
         bands     = try c.decode([Int].self, forKey: .bands)
@@ -173,6 +189,7 @@ struct DeviceConfig: Codable, Equatable {
 
     init(hostname: String, ssid: String, radioType: RadioType = .tci,
          tciHost: String, tciPort: Int, region: Int, guardMs: Int, bands: [Int],
+         catBaud: Int = 9600, civAddr: Int = 0x94,
          bands2: [Int]? = nil,
          mode: CtrlMode = .standalone, peerHost: String = "",
          interlockPolicy: InterlockPolicy = .firstCome, onPeerLoss: PeerLoss = .safe,
@@ -182,6 +199,7 @@ struct DeviceConfig: Codable, Equatable {
          relayBands: [Int]? = nil, relayFeed: [Int]? = nil, relayGroup: [Int]? = nil) {
         self.hostname = hostname; self.ssid = ssid; self.radioType = radioType
         self.tciHost = tciHost; self.tciPort = tciPort; self.region = region
+        self.catBaud = catBaud; self.civAddr = civAddr
         self.guardMs = guardMs; self.bands = bands
         self.bands2 = DeviceConfig.normalizedInts(bands2, count: bands.count)
         self.mode = mode; self.peerHost = peerHost
@@ -203,6 +221,8 @@ struct DeviceConfig: Codable, Equatable {
             URLQueryItem(name: "rtype",    value: String(radioType.rawValue)),
             URLQueryItem(name: "host",     value: tciHost),
             URLQueryItem(name: "port",     value: String(tciPort)),
+            URLQueryItem(name: "catbaud",  value: String(catBaud)),
+            URLQueryItem(name: "civ",      value: String(format: "0x%02X", civAddr)),
             URLQueryItem(name: "region",   value: String(region)),
             URLQueryItem(name: "hostname", value: hostname),
             URLQueryItem(name: "guard",    value: String(guardMs)),

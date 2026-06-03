@@ -10,14 +10,16 @@
 // §11): collisions, first-come vs priority, TX-safety, fallback taken / blocked,
 // and recovery. The on-board /test/inject API drives the same scenarios live;
 // the Swift integration suite asserts them end-to-end.
-#include "Config.h"      // real — via shims/ (enums, struct, migration)
-#include "Interlock.h"   // real — the resolvers under test
+#include "Config.h"           // real — via shims/ (enums, struct, migration)
+#include "Interlock.h"        // real — the resolvers under test
+#include "SerialCatSource.h"  // real — the CAT frequency parsers under test
 #include <cstdio>
 
 // Globals the shims declare extern.
-unsigned long g_fakeMillis = 0;
-WiFiClass     WiFi;
-EEPROMClass   EEPROM;
+unsigned long  g_fakeMillis = 0;
+WiFiClass      WiFi;
+EEPROMClass    EEPROM;
+HardwareSerial Serial;
 
 static int g_pass = 0, g_fail = 0;
 static const char* g_group = "";
@@ -178,10 +180,43 @@ static void test_config() {
     CHECK(zeroed); }
 }
 
+// --- Serial CAT frequency parsers (SerialCatSource.h) ----------------------
+static void test_cat() {
+  GROUP("Serial CAT parsers");
+
+  // Kenwood/Yaesu "IF;" — frequency is the 11 digits after "IF".
+  { const char* r = "IF00014074000     +0000000000;";   // 20 m
+    CHECK(catParseIF(r, strlen(r)) == 14074000); }
+  { const char* r = "IF00007150000;";                     // 40 m
+    CHECK(catParseIF(r, strlen(r)) == 7150000); }
+  { const char* r = "ZZFA00014074000;";                   // no "IF" → 0
+    CHECK(catParseIF(r, strlen(r)) == 0); }
+  { const char* r = "garbage;";  CHECK(catParseIF(r, strlen(r)) == 0); }
+
+  // CI-V little-endian BCD: 5 bytes, 2 digits each, LSB pair first.
+  { uint8_t b[] = {0x00, 0x40, 0x07, 0x14, 0x00};   // 14,074,000 Hz
+    CHECK(catDecodeBcd(b, 5) == 14074000); }
+  { uint8_t b[] = {0x00, 0x50, 0x15, 0x00, 0x00};   // 1,550,000? check 3.5 MHz
+    // 3,500,000 → groups 00 00 50 03 00 (LSB first): bytes 0x00,0x00,0x50,0x03,0x00
+    uint8_t c[] = {0x00, 0x00, 0x50, 0x03, 0x00};
+    CHECK(catDecodeBcd(c, 5) == 3500000); (void)b; }
+
+  // Full CI-V read-freq reply frame addressed to the controller (E0).
+  { uint8_t f[] = {0xFE, 0xFE, 0xE0, 0x94, 0x03, 0x00, 0x40, 0x07, 0x14, 0x00, 0xFD};
+    CHECK(catParseCiv(f, sizeof(f)) == 14074000); }
+  // Transceive broadcast (cmd 0x00) is also accepted; leading noise is skipped.
+  { uint8_t f[] = {0x11, 0xFE, 0xFE, 0xE0, 0x94, 0x00, 0x00, 0x40, 0x07, 0x14, 0x00, 0xFD};
+    CHECK(catParseCiv(f, sizeof(f)) == 14074000); }
+  // Frame addressed elsewhere (not E0) is ignored.
+  { uint8_t f[] = {0xFE, 0xFE, 0x94, 0xE0, 0x03, 0x00, 0x40, 0x07, 0x14, 0x00, 0xFD};
+    CHECK(catParseCiv(f, sizeof(f)) == 0); }
+}
+
 int main() {
   test_dual();
   test_master();
   test_config();
+  test_cat();
   printf("\n%d passed, %d failed\n", g_pass, g_fail);
   return g_fail ? 1 : 0;
 }

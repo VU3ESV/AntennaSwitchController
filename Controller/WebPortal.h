@@ -104,6 +104,11 @@ class WebPortal {
     return "Relay " + String(r + 1);
   }
 
+  // Two-digit hex for a CI-V address byte, e.g. 0x94 -> "0x94".
+  static String civHex(uint8_t v) {
+    char b[6]; snprintf(b, sizeof(b), "0x%02X", v); return String(b);
+  }
+
   // True when band `b` is mapped to relay `r` whose declared coverage (non-zero)
   // does not include `b` — i.e. an antenna assigned a band it can't work.
   static bool coverageMismatch(const Config& c, int r, int b) {
@@ -143,10 +148,19 @@ class WebPortal {
     h += F("<label>Type</label><select name=rtype>");
     h += "<option value=0" + String(c.radio_type == RADIO_TCI  ? " selected" : "") + ">TCI (ExpertSDR / SunSDR)</option>";
     h += "<option value=1" + String(c.radio_type == RADIO_FLEX ? " selected" : "") + ">FlexRadio (SmartSDR TCP)</option>";
+    h += "<option value=2" + String(c.radio_type == RADIO_CAT_KENWOOD ? " selected" : "") + ">Serial CAT — Kenwood / Elecraft</option>";
+    h += "<option value=4" + String(c.radio_type == RADIO_CAT_YAESU   ? " selected" : "") + ">Serial CAT — Yaesu (FT-991A/DX10)</option>";
+    h += "<option value=3" + String(c.radio_type == RADIO_CAT_ICOM    ? " selected" : "") + ">Serial CAT — Icom (CI-V)</option>";
     h += F("</select><div class=row>");
-    h += "<div><label>Host / IP</label><input name=host value=\"" + esc(c.tci_host) + "\"></div>";
+    h += "<div><label>Host / IP <span class=muted>(network)</span></label><input name=host value=\"" + esc(c.tci_host) + "\"></div>";
     h += "<div><label>Port</label><input name=port type=number value=" + String(c.tci_port) + "></div>";
-    h += F("</div><label>Receiver <span class=muted>(TCI, 2-RX radios)</span></label><select name=rrx>");
+    h += F("</div><div class=row>");
+    h += "<div><label>CAT baud <span class=muted>(serial)</span></label><input name=catbaud type=number value=" + String(c.cat_baud) + "></div>";
+    h += "<div><label>CI-V addr <span class=muted>(Icom, hex)</span></label><input name=civ value=\"" + civHex(c.civ_addr) + "\"></div>";
+    h += F("</div><p class=muted>Serial CAT uses the board's UART (one serial radio per board; "
+           "see HARDWARE.md) and tracks band only — it can't inhibit switching during TX. "
+           "The serial console is off while a CAT radio is selected.</p>");
+    h += F("<label>Receiver <span class=muted>(TCI, 2-RX radios)</span></label><select name=rrx>");
     h += "<option value=0" + String(c.radio_rx == 0 ? " selected" : "") + ">RX1</option>";
     h += "<option value=1" + String(c.radio_rx == 1 ? " selected" : "") + ">RX2</option>";
     h += F("</select><p class=muted>TCI port default 50001; FlexRadio SmartSDR is 4992.</p>");
@@ -308,8 +322,14 @@ class WebPortal {
     if (server_.hasArg("r2rx"))   c.radio2_rx        = (uint8_t)constrain(server_.arg("r2rx").toInt(), 0, 1);
     if (server_.hasArg("port"))   c.tci_port    = (uint16_t)server_.arg("port").toInt();
     if (server_.hasArg("region")) c.iaru_region = (uint8_t)constrain(server_.arg("region").toInt(), 1, 3);
-    if (server_.hasArg("rtype"))  c.radio_type  = (uint8_t)constrain(server_.arg("rtype").toInt(), 0, 1);
+    if (server_.hasArg("rtype"))  c.radio_type  = (uint8_t)constrain(server_.arg("rtype").toInt(), 0, RADIO_CAT_YAESU);
     if (server_.hasArg("guard"))  c.guard_ms    = (uint16_t)constrain(server_.arg("guard").toInt(), 0, 5000);
+    if (server_.hasArg("catbaud")) c.cat_baud   = (uint32_t)server_.arg("catbaud").toInt();
+    if (server_.hasArg("civ")) {                 // accepts "0x94" or decimal
+      String v = server_.arg("civ"); v.trim();
+      long a = v.startsWith("0x") || v.startsWith("0X") ? strtol(v.c_str(), nullptr, 16) : v.toInt();
+      c.civ_addr = (uint8_t)(a & 0xFF);
+    }
     for (int b = 0; b < NUM_BANDS; b++) {
       String key = "b" + String(b);
       if (server_.hasArg(key))
@@ -384,13 +404,15 @@ class WebPortal {
   void handleConfig() {
     Config& c = *cfg_;
     String j;
-    j.reserve(768);                 // whole config in one alloc (no per-append churn)
+    j.reserve(896);                 // whole config in one alloc (no per-append churn)
     j += "{";
     j += "\"hostname\":\""  + esc(c.hostname) + "\",";
     j += "\"ssid\":\""      + esc(c.wifi_ssid) + "\",";
     j += "\"tci_host\":\""  + esc(c.tci_host) + "\",";
     j += "\"tci_port\":"    + String(c.tci_port) + ",";
     j += "\"radio_type\":"  + String(c.radio_type) + ",";
+    j += "\"cat_baud\":"    + String(c.cat_baud) + ",";     // serial CAT baud
+    j += "\"civ_addr\":"    + String(c.civ_addr) + ",";     // Icom CI-V address
     j += "\"mode\":"        + String(c.mode) + ",";
     j += "\"peer_host\":\"" + esc(c.peer_host) + "\",";
     j += "\"interlock_policy\":" + String(c.interlock_policy) + ",";

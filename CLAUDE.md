@@ -125,7 +125,7 @@ at power-up, and SHOULD prefer GPIO14/12/13/4/5 for the most-used bands.
   | `/`        | GET    | Config form: WiFi, TCI host/port, band→relay map, manual override |
   | `/save`    | POST   | Persist settings                                 |
   | `/status`  | GET    | JSON: current band, active relay, TCI/WiFi/TX/Tune, mode |
-  | `/config`  | GET    | JSON: stored settings (band→relay map + per-band SO2R fallback map, relay names + per-relay antenna metadata (band coverage / feed / group), radio_type, radio host/port, receiver index, mode/peer/interlock, radio2_*, switch_type, region, hostname, guard, SSID — **never** passwords) for the macOS app |
+  | `/config`  | GET    | JSON: stored settings (band→relay map + per-band SO2R fallback map, relay names + per-relay antenna metadata (band coverage / feed / group), radio_type (+ cat_baud / civ_addr for serial CAT), radio host/port, receiver index, mode/peer/interlock, radio2_*, switch_type, region, hostname, guard, SSID — **never** passwords) for the macOS app |
   | `/relay`   | POST   | Manual override: `set=auto\|none\|0..7`          |
   | `/discover`| GET    | Device identity + mDNS metadata + firmware version |
   | `/reboot`  | POST   | Soft reboot                                      |
@@ -203,6 +203,7 @@ Config.h           EEPROM settings struct + CRC32 load/save, defaults, MAC hostn
 RadioSource.h      abstract "band + TX" source (poll-based)
 TciSource.h        RadioSource over the bundled TCI client; setRig() picks RX1/RX2
 FlexSource.h       RadioSource over FlexRadio SmartSDR (TCP 4992); P1, build-verified
+SerialCatSource.h  RadioSource over read-only serial CAT on UART0 (Kenwood/Yaesu "IF;" + Icom CI-V); P1, build-verified, band-only (no TX)
 OutputStage.h      relay map; Relay8x1 (8×1 break-before-make) + Relay8x2 (8×2: relay i=antenna i, one HIGH per radio)
 Interlock.h        SO2R MasterArbiter + SlaveClient (Mode A, debounced heartbeat) + DualResolver (Mode B)
 WebPortal.h        HTTP routes + HTML config page (+ /config, /discover)
@@ -218,7 +219,11 @@ RTX.h RTX.cpp      bundled IW7DMH RTX state (band edges, VFO/TRX/tune getters)
 > 8×2 output stage. **P1** added `FlexSource` (FlexRadio SmartSDR over TCP) and a
 > `radio_type` config field selecting the transport (TCI / FlexRadio), with a
 > v1→v2 EEPROM migration that preserves the saved band map. FlexRadio is
-> build-verified only (no live rig tested yet). **P2b** added SO2R **Mode A**
+> build-verified only (no live rig tested yet). P1 later added **serial CAT**
+> (`SerialCatSource`, config v9): read-only `IF;` (Kenwood / modern Yaesu) + Icom
+> CI-V over UART0, selected by `radio_type` with `cat_baud`/`civ_addr`; takes over
+> the console, tracks band only (no CAT TX inhibit). Parsers have host tests but
+> no serial rig has been tested. **P2b** added SO2R **Mode A**
 > (master/slave over the LAN): a `mode` config (standalone/master/slave) with a
 > v2→v3 EEPROM migration, `Interlock.h` (master `MasterArbiter` + slave
 > `SlaveClient`), the `/interlock*` HTTP API, and app UI (role picker +

@@ -40,8 +40,27 @@ struct SettingsView: View {
                         Text(type.label).tag(type)
                     }
                 }
-                TextField("Host / IP", text: $vm.config.tciHost)
-                TextField("Port", value: $vm.config.tciPort, format: .number.grouping(.never))
+                if vm.config.radioType.isSerial {
+                    // Serial CAT on the board's UART — band tracking only.
+                    Picker("CAT baud", selection: $vm.config.catBaud) {
+                        ForEach([4800, 9600, 19200, 38400, 57600, 115200], id: \.self) {
+                            Text("\($0)").tag($0)
+                        }
+                    }
+                    if vm.config.radioType == .catIcom {
+                        HStack {
+                            Text("CI-V address")
+                            Spacer()
+                            TextField("0x94", text: civAddrHexBinding)
+                                .frame(width: 80).multilineTextAlignment(.trailing)
+                        }
+                    }
+                    Text("Read-only serial CAT (one per board, UART0). Tracks band only — it can't inhibit switching during TX. See HARDWARE.md.")
+                        .font(.caption).foregroundStyle(.secondary)
+                } else {
+                    TextField("Host / IP", text: $vm.config.tciHost)
+                    TextField("Port", value: $vm.config.tciPort, format: .number.grouping(.never))
+                }
                 if vm.config.radioType == .tci {
                     Picker("Receiver", selection: $vm.config.radioRx) {
                         Text("RX1").tag(0); Text("RX2").tag(1)
@@ -245,6 +264,17 @@ struct SettingsView: View {
                 let old = vm.config.radioType
                 if vm.config.tciPort == old.defaultPort { vm.config.tciPort = newType.defaultPort }
                 vm.config.radioType = newType
+            }
+        )
+    }
+
+    /// CI-V address edited as hex text ("0x94"); accepts hex with/without 0x.
+    private var civAddrHexBinding: Binding<String> {
+        Binding(
+            get: { String(format: "0x%02X", vm.config.civAddr) },
+            set: { txt in
+                let s = txt.lowercased().replacingOccurrences(of: "0x", with: "")
+                if let v = Int(s, radix: 16), (0...255).contains(v) { vm.config.civAddr = v }
             }
         )
     }
