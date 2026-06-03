@@ -307,10 +307,13 @@ Same ESP8266 sketch; the mode selects the topology.
 
 1. ✅ **P0 — Refactor, no behaviour change.** `RadioSource` + `OutputStage`;
    single-TCI 8×1 preserved. *(done — commit 4f28fe6)*
-2. ◑ **P1 — Multi-transport (per board).** `FlexSource` (FlexRadio SmartSDR TCP)
-   + `radio_type` selector, app radio-source picker. *(done — 5b523e5;
-   build-verified. Serial CAT — `SerialCatSource` Kenwood/Icom/Yaesu + level
-   converters + HARDWARE.md — still TODO.)*
+2. ✅ **P1 — Multi-transport (per board).** `FlexSource` (FlexRadio SmartSDR TCP)
+   + `radio_type` selector, app radio-source picker *(5b523e5; build-verified)*.
+   **Serial CAT done** — `SerialCatSource` (read-only): Kenwood/modern-Yaesu
+   `IF;` + Icom CI-V (config v9 `cat_baud`/`civ_addr`), takes over UART0 (console
+   off while active), band-tracking only (no CAT TX inhibit). Parsers covered by
+   host tests; level-converter wiring in [HARDWARE.md §3](HARDWARE.md).
+   **Build-verified only — no serial rig tested.**
 3. ✅ **P2a — Mode B (single dual-radio + 8×2).** 2nd `RadioSource`, in-firmware
    `DualResolver`, `Relay8x2` per-antenna A/B (8× SPDT); app Dual UI. *(done;
    build-verified — no 8×2 switch wired yet.)*

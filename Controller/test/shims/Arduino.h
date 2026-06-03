@@ -34,3 +34,16 @@ class String {
   bool operator==(const char* c) const { return s == (c ? c : ""); }
 };
 inline String operator+(const char* a, const String& b) { String r(a); r += b; return r; }
+
+// Minimal HardwareSerial stub so SerialCatSource.h compiles on host (the parsers
+// are tested directly; the serial path is not exercised here).
+class HardwareSerial {
+ public:
+  void begin(unsigned long) {}
+  int  available() { return 0; }
+  int  read() { return -1; }
+  size_t write(const uint8_t*, size_t n) { return n; }
+  size_t write(uint8_t) { return 1; }
+  size_t print(const char*) { return 0; }
+};
+extern HardwareSerial Serial;

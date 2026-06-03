@@ -12,6 +12,18 @@ work. See the [GitHub Releases] for downloads.
 
 ## [Unreleased]
 ### Added
+- **Serial CAT radio support (read-only) — P1.** A radio can now be tracked over
+  **serial CAT** on the board's UART, in addition to TCI and FlexRadio: **Kenwood
+  / Elecraft** and **modern Yaesu** (FT-991A / FT-DX10) via the ASCII `IF;` poll,
+  and **Icom CI-V** (IC-7300/9700/705/7610) via the binary frequency frame. New
+  `radio_type` options plus `cat_baud` and an Icom `civ_addr`, in the app's Radio
+  settings and the web page (config **v9**; v8→v9 migration). It takes over UART0
+  (the serial console is disabled while a CAT radio is selected) and tracks
+  **band only** — unlike TCI/Flex it can't inhibit switching during TX, so don't
+  change bands while transmitting and sequence any amplifier externally. Level
+  converters are required — see [docs/HARDWARE.md §3](docs/HARDWARE.md). The CAT
+  frequency parsers have host unit tests; **the serial path is build-verified
+  only (no live rig tested).**
 - **Pick the SO2R master from mDNS discovery.** In Slave mode, Settings offers a
   "Pick master from network" menu of the controllers found via Bonjour
   (`_antsw._tcp`), excluding this unit; selecting one fills in the master address
