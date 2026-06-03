@@ -77,7 +77,11 @@ at power-up, and SHOULD prefer GPIO14/12/13/4/5 for the most-used bands.
   `RTX.cpp`). The upstream library is ESP32/FreeRTOS-only; this copy is **ported
   to ESP8266** by guarding all FreeRTOS/`<WiFi.h>` code behind `#if !defined(ESP8266)`
   and adding a cooperative `TCI::process()` (pumps `webSocket.loop()` + drains
-  one queued frame) called from the Arduino `loop()`.
+  a small bounded batch of queued frames) called from the Arduino `loop()`. A
+  single TCI link demultiplexes both receivers into `rtx[0]`/`rtx[1]`, so in
+  Mode B with two TCI radios on the **same host:port** (SunSDR2) the second
+  `TciSource` shares the first's client (`shareWith()`) rather than opening a
+  redundant WebSocket.
 - **R2.2** TCI server `host` and `port` SHALL be configurable via the web UI and
   persisted. Default port `50001` (ExpertSDR3); SHALL also work with SunSDR2 PRO
   and other TCI-compliant servers.
