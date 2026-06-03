@@ -300,14 +300,22 @@ void TCI::put_messages(char *data, unsigned int length)
 	if (ws_buffer_full)
 	{
 		Serial.printf("=== Element discarded - LIST FULL !!!\n");
-	} else {         
-		ws_messages[write_index].len = length;        
-		sprintf(ws_messages[write_index].ws_data,data);
-		/*Serial.printf("Element: %02d - %03u - %s - added\n", 
-						write_index, 
-						ws_messages[write_index].len, 
+	} else if (length >= MESSAGE_LEN) {
+		// A frame longer than the ring slot would overflow ws_data[MESSAGE_LEN]
+		// (the old unbounded sprintf() smashed adjacent buffers → crash/reboot,
+		// dropping every relay). Drop oversized frames: all band/TX/tune events
+		// we act on are short (< MESSAGE_LEN); long frames are not switch-critical.
+		Serial.printf("=== Element discarded - len %u >= %d !!!\n", length, MESSAGE_LEN);
+	} else {
+		// Bounded copy (no format-string interpretation of payload, no overflow).
+		memcpy(ws_messages[write_index].ws_data, data, length);
+		ws_messages[write_index].ws_data[length] = '\0';
+		ws_messages[write_index].len = length;
+		/*Serial.printf("Element: %02d - %03u - %s - added\n",
+						write_index,
+						ws_messages[write_index].len,
 						ws_messages[write_index].ws_data);*/
-	
+
 		write_index = (write_index + 1) % WS_LIST_SIZE;
 		
 		if (read_index == write_index)
