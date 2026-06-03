@@ -11,15 +11,21 @@ struct ControlsView: View {
     /// Human summary of which relay(s) are energized — two in dual mode (one per
     /// radio), one otherwise.
     private func energizedSummary(_ s: DeviceStatus) -> String {
-        func label(_ i: Int) -> String { i >= 0 ? vm.config.relayLabel(i) : "OFF" }
-        // Override applies to Radio 1: -2 auto, -1 manual off, 0..7 manual relay.
+        // One leg per radio: "Radio 1 → 80m Dipole (auto)", or "Radio 1 off (manual)".
+        func leg(_ radio: String, _ idx: Int, _ mode: String) -> String {
+            idx >= 0 ? "\(radio) → \(vm.config.relayLabel(idx)) (\(mode))"
+                     : "\(radio) off (\(mode))"
+        }
+        // The manual override applies to Radio 1: -2 auto, -1 off, 0..7 a relay.
         let r1Mode = s.overrideMode == -2 ? "auto" : "manual"
         if s.isDual {
-            let r1 = s.radio1RelayIndex, r2 = s.radio2RelayIndex ?? -1
-            return "Radio 1 → \(label(r1)) (\(r1Mode))   ·   Radio 2 → \(label(r2)) (auto)"
+            return leg("Radio 1", s.radio1RelayIndex, r1Mode) + "   ·   "
+                 + leg("Radio 2", s.radio2RelayIndex ?? -1, "auto")
         }
-        if s.overrideMode == -1 { return "Manually OFF — no relay energized." }
-        if s.activeRelay < 0    { return "No relay energized (auto)." }
+        if s.activeRelay < 0 {
+            return s.overrideMode == -1 ? "Manually off — no antenna connected."
+                                        : "No antenna connected (auto)."
+        }
         return "\(vm.config.relayLabel(s.activeRelay)) energized (\(r1Mode))."
     }
 
