@@ -76,6 +76,7 @@ jobs:
 
   firmware:
     name: Build ESP8266 firmware
+    needs: version            # stamp the release version into FW_VERSION
     # Only on a real merge (or tag/dispatch) — a closed-but-unmerged PR must not release.
     if: github.event_name != 'pull_request' || github.event.pull_request.merged == true
     runs-on: ubuntu-latest
@@ -94,9 +95,14 @@ jobs:
           arduino-cli lib install WebSockets
 
       - name: Compile firmware (.bin)
+        env:
+          VERSION: ${{ needs.version.outputs.value }}
         run: |
+          # Inject the release version so /discover (and the mDNS TXT) report the
+          # real version instead of the hardcoded "1.0" fallback in WebPortal.h.
           arduino-cli compile \
             --fqbn esp8266:esp8266:generic:eesz=4M1M \
+            --build-property "compiler.cpp.extra_flags=-DFW_VERSION=\"${VERSION}\"" \
             --output-dir fw \
             Controller
           cp fw/Controller.ino.bin AntennaSwitchController-firmware.bin

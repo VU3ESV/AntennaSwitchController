@@ -29,6 +29,11 @@ work. See the [GitHub Releases] for downloads.
   batch of queued frames per call (was one), so a busy radio's events don't back up.
 
 ### Fixed
+- **Firmware version reported correctly.** The controller's `/discover` (and mDNS
+  TXT) reported a hardcoded `"1.0"` regardless of the build — the release pipeline
+  only stamped the version into the macOS app, not the firmware. The release now
+  injects the tag into `FW_VERSION` at compile time, so the app's dashboard shows
+  the real firmware version (e.g. `0.1.15`). Local builds still fall back to `1.0`.
 - **Band-change reboot in Mode B (dangerous: dropped a live antenna).** Tuning one
   receiver to a new band could reset the ESP — a CPU exception (LoadStoreError)
   that de-energized **every** relay for ~6 s before reconnecting. Root cause: the
