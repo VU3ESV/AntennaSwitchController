@@ -115,7 +115,11 @@ struct SettingsView: View {
                     }
                     TextField("Host / IP", text: $vm.config.radio2Host)
                     TextField("Port", value: $vm.config.radio2Port, format: .number.grouping(.never))
-                    if vm.config.radio2Type == .tci {
+                    // The RX1/RX2 picker only makes sense when both radios are the
+                    // SAME TCI server (one 2-receiver radio). For two separate radios
+                    // each uses its own RX1, so hide the picker and force RX1 (see
+                    // normalizeRadio2Rx, applied on save).
+                    if radio2SharesRadio1 {
                         Picker("Receiver", selection: $vm.config.radio2Rx) {
                             Text("RX1").tag(0); Text("RX2").tag(1)
                         }
@@ -124,14 +128,19 @@ struct SettingsView: View {
                     Picker("External switch", selection: $vm.config.switchType) {
                         ForEach(SwitchType.allCases, id: \.self) { Text($0.label).tag($0) }
                     }
-                    Text("One 2-RX radio (e.g. SunSDR2): set radio 1 + radio 2 to the same Host/Port, radio 1 = RX1, radio 2 = RX2.")
-                        .font(.caption).foregroundStyle(.secondary)
+                    if radio2SharesRadio1 {
+                        Text("One 2-receiver radio (e.g. SunSDR2): radio 1 + radio 2 share this Host/Port — radio 1 = RX1, radio 2 = RX2.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    } else {
+                        Text("Separate radio — tracks its own RX1. (RX2 only applies when both radios share one Host/Port, e.g. a 2-receiver SunSDR2.)")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
                 }
             }
 
             Section {
                 HStack {
-                    Button { Task { await vm.save() } } label: {
+                    Button { Task { normalizeRadio2Rx(); await vm.save() } } label: {
                         if vm.isSaving { ProgressView().controlSize(.small) }
                         else { Text("Save & Apply") }
                     }
@@ -149,6 +158,21 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
+    }
+
+    /// True when Radio 2 is the SAME TCI endpoint as Radio 1 — i.e. one physical
+    /// radio exposing two receivers (RX1/RX2). Only then is the Radio 2 RX picker
+    /// meaningful; two separate radios each use their own RX1.
+    private var radio2SharesRadio1: Bool {
+        vm.config.radioType == .tci && vm.config.radio2Type == .tci &&
+        vm.config.radio2Host == vm.config.tciHost &&
+        vm.config.radio2Port == vm.config.tciPort
+    }
+
+    /// Force Radio 2 to RX1 unless it shares Radio 1's endpoint, so a stale RX2
+    /// from an earlier single-2-receiver-radio setup can't break a separate radio.
+    private func normalizeRadio2Rx() {
+        if !radio2SharesRadio1 { vm.config.radio2Rx = 0 }
     }
 
     /// Binding for the radio type. Switching transports retunes the port to the
