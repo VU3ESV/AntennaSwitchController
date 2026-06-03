@@ -7,6 +7,19 @@ struct DashboardView: View {
     @ObservedObject var vm: ControllerViewModel
     @Environment(\.radioTheme) private var theme
 
+    var body: some View {
+        ScrollView { DashboardContent(vm: vm) }
+            .background(theme.background)
+    }
+}
+
+/// The dashboard's scrollable content as a standalone view, so it can be rendered
+/// for the documentation screenshots (ImageRenderer doesn't lay out the content
+/// of a ScrollView offscreen).
+struct DashboardContent: View {
+    @ObservedObject var vm: ControllerViewModel
+    @Environment(\.radioTheme) private var theme
+
     private let columns = [GridItem(.adaptive(minimum: 180), spacing: 12)]
 
     /// "None", or the relay's name + GPIO (e.g. "80m Dipole (GPIO14)").
@@ -16,8 +29,7 @@ struct DashboardView: View {
     }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: 16) {
                 if let err = vm.errorMessage, !vm.connected {
                     Banner(level: .error, title: "Disconnected", message: err)
                 }
@@ -95,8 +107,6 @@ struct DashboardView: View {
                 }
             }
             .padding()
-        }
-        .background(theme.background)
     }
 }
 

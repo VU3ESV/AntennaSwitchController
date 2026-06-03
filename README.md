@@ -45,7 +45,9 @@ A web portal maps each band to a relay; firmware updates go **over-the-air**.
   LAN interlock) and *Mode B* single board driving an external **8×2** switch.
   See [Multi-radio & SO2R](#multi-radio--so2r) below.
 - **Multi-receiver radios** — a SunSDR2 with two receivers (RX1/RX2) drives SO2R
-  from **one** board (both radios on one TCI link, RX1 + RX2).
+  from **one** board over a single shared TCI link (RX1 + RX2).
+- **Named antennas** — give each relay a name (e.g. "80m Dipole"); it shows
+  across the app and web UI instead of "R1–R8".
 - 11 bands (160 m–6 m incl. 60 m); each band → one of 8 relays or none/bypass.
 - Exclusive, break-before-make switching (~50 ms guard); deferred during TX/tune.
 - Failsafe: all relays de-energized on boot / WiFi loss / radio loss / unmapped band.
@@ -135,6 +137,10 @@ set **Radio 1 = RX1** and **Radio 2 = RX2**, and pick the **8×2** switch.
 Each receiver follows its own band → antenna; the interlock guarantees they never
 land on the same antenna.
 
+> **Two _separate_ radios** (different IP/port)? Give each its own Host/Port and
+> leave both on **RX1** — RX2 is only for a single radio that exposes a second
+> receiver. The app hides the RX picker unless both radios share one Host/Port.
+
 ---
 
 ## The App (macOS)
@@ -143,19 +149,23 @@ Manage **multiple** controllers on your network — add by IP/hostname or pick t
 up automatically via Bonjour, then monitor and fully configure each one. Every
 option from the controller's web page is available natively.
 
-**Dashboard** — live band, frequency, active relay, mode, and WiFi/TCI/TX/Tune
-status (here: controller `2F` connected, on 40 m / 7.140 MHz, relay R2, Auto/TCI):
+**Dashboard** — live band, frequency, and the **named** active antenna per radio,
+plus mode and WiFi/TCI/TX/Tune. In **Mode B** it shows *both* radios (here: Radio 1
+on 20 m → "20m Hex", Radio 2 on 40 m → "40m Vertical", firmware 0.1.15):
 
 ![App dashboard](App/docs/images/app-dashboard.png)
 
-**Controls** — manual override: force any relay, All Off, or return to Auto (TCI):
+**Controls** — manual override: tap a relay to force it (energized relays show in
+**red**), tap an active relay again to switch it off, or use Auto (TCI) / All Off.
+Relays are labeled with your antenna names; the summary shows each radio's antenna:
 
 ![App controls](App/docs/images/app-controls.png)
 
 **Settings** — every web-page option: WiFi, radio type (TCI / FlexRadio) + host/port
-+ receiver (RX1/RX2) + IARU region, the full band→relay map, the **SO2R role**
-(Standalone / Master / Slave / Dual) with interlock policy and — for Dual — the
-second radio + 8×2 switch, plus hostname, OTA password, break-before-make guard:
++ receiver (RX1/RX2) + IARU region, **per-relay antenna names**, the full band→relay
+map, the **SO2R role** (Standalone / Master / Slave / Dual) with interlock policy
+and — for Dual — the second radio + 8×2 switch, plus hostname, OTA password,
+break-before-make guard:
 
 ![App settings](App/docs/images/app-settings.png)
 
@@ -281,8 +291,8 @@ collides with other plugins.
 | Route | Method | Used for |
 |-------|--------|----------|
 | `/discover` | GET | identity (device, firmware version, relays) |
-| `/status`   | GET | live state (band, active relay, TCI/WiFi/TX, interlock, radio 2…) |
-| `/config`   | GET | stored settings → Settings form (radio type/receiver, mode/peer/interlock, radio 2, switch type… no passwords) |
+| `/status`   | GET | live state (band, per-radio relays `radio1_relay`/`radio2_relay`, `relay_mask`, TCI/WiFi/TX, interlock, radio 2…) |
+| `/config`   | GET | stored settings → Settings form (radio type/receiver, mode/peer/interlock, radio 2, switch type, **relay names**… no passwords) |
 | `/save`     | POST (form) | persist settings |
 | `/relay?set=auto\|none\|0..7` | POST | manual override |
 | `/interlock` | GET | SO2R Mode A interlock state (`role, peer_up, beats_missed, master_ant, slave_ant`) |
