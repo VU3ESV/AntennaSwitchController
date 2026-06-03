@@ -24,7 +24,7 @@ struct ControlsView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Manual Override").font(.headline).foregroundStyle(theme.textPrimary)
-            Text("Force a specific relay regardless of TCI. ‘Auto’ returns to band tracking. Switching is break-before-make and is deferred while the radio is transmitting.")
+            Text("Force a relay regardless of TCI — **tap an active (red) relay again to switch it off**. ‘Auto’ returns to band tracking; ‘All Off’ disconnects everything. Switching is break-before-make and deferred while transmitting.")
                 .font(.caption).foregroundStyle(theme.textSecondary)
 
             HStack {
@@ -49,18 +49,28 @@ struct ControlsView: View {
             LazyVGrid(columns: columns, spacing: 10) {
                 ForEach(0..<kRelayCount, id: \.self) { r in
                     let active = vm.status?.energizedRelays.contains(r) ?? false
+                    let forced = (vm.status?.overrideMode ?? -2) == r
                     let named = r < vm.config.relayNames.count && !vm.config.relayNames[r].isEmpty
-                    Button { Task { await vm.setRelay(String(r)) } } label: {
+                    Button {
+                        // Toggle: tap the forced relay again to switch it off;
+                        // otherwise force this relay on.
+                        Task { await vm.setRelay(forced ? "none" : String(r)) }
+                    } label: {
                         VStack(spacing: 2) {
-                            Text(vm.config.relayLabel(r)).font(.headline)
-                                .lineLimit(1).minimumScaleFactor(0.6)
+                            HStack(spacing: 4) {
+                                if forced { Image(systemName: "hand.raised.fill").font(.caption2) }
+                                Text(vm.config.relayLabel(r)).font(.headline)
+                                    .lineLimit(1).minimumScaleFactor(0.6)
+                            }
                             Text(named ? "R\(r + 1) · GPIO\(kRelayGPIO[r])" : "GPIO\(kRelayGPIO[r])")
                                 .font(.caption2).foregroundStyle(theme.textSecondary)
                         }
                         .frame(maxWidth: .infinity).padding(.vertical, 10)
                     }
                     .buttonStyle(.bordered)
-                    .tint(active ? theme.success : theme.textSecondary)
+                    // Active (energized) relays are red; idle relays grey. A forced
+                    // relay also shows a hand icon — tap it again to switch it off.
+                    .tint(active ? theme.danger : theme.textSecondary)
                 }
             }
 

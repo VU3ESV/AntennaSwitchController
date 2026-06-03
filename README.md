@@ -1,7 +1,7 @@
 # Antenna Switch Controller
 
 [![CI](https://github.com/VU3ESV/AntennaSwitchController/actions/workflows/ci.yml/badge.svg)](https://github.com/VU3ESV/AntennaSwitchController/actions/workflows/ci.yml)
-[![Release](https://github.com/VU3ESV/AntennaSwitchController/actions/workflows/release.yml/badge.svg)](https://github.com/VU3ESV/AntennaSwitchController/actions/workflows/release.yml)
+[![Release](https://github.com/VU3ESV/AntennaSwitchController/actions/workflows/release.yml/badge.svg?event=pull_request)](https://github.com/VU3ESV/AntennaSwitchController/actions/workflows/release.yml)
 
 A band-following **antenna switch** for amateur radio: an ESP8266 controller that
 tracks the radio's active band (over **TCI** or **FlexRadio SmartSDR**) and
