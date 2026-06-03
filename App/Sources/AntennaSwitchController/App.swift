@@ -5,6 +5,12 @@ import RadioPluginUI
 /// the process); the plugin path is `AntennaSwitchPlugin`. Kept `public` so the
 /// thin `AntennaSwitchControllerMain` executable can call `.main()` on it.
 public struct AntennaSwitchStandaloneApp: App {
+    // Removing the `.newItem` command (below) also disables SwiftUI's
+    // dock-reopen, so closing the window would otherwise leave a windowless
+    // process stuck in the Dock. Quit on last-window-close instead — standard
+    // single-window utility behaviour. (Standalone only; the suite host owns the
+    // plugin's lifecycle.)
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var store = ControllersStore()
 
     /// Set via the `ASC_DEMO` env var to show a single pane with mock data, for
@@ -47,4 +53,11 @@ public struct AntennaSwitchStandaloneApp: App {
         default:          SettingsView(vm: vm)
         }
     }
+}
+
+/// Quits the standalone app when its window is closed. Without this, SwiftUI
+/// keeps the process alive with no window (and, because `.newItem` is removed,
+/// no way to reopen one), so the Dock icon becomes unresponsive.
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 }
