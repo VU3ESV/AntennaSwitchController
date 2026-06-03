@@ -472,12 +472,17 @@ metadata, or be *derived* from the antenna list:
 ### 11.7 Phased approach (P4, refines §9)
 - **M0 — Document the today-pattern** (no code): map all of a HexBeam's bands to
   one named relay; covers every single-radio user immediately. *(README/CLAUDE.)*
+- ✅ **M2 — Per-band secondary fallback in the resolver** *(done + **live-validated**
+  — config **v7** `band_relay2[]`; fallback wired into the Mode A `MasterArbiter`
+  + `SlaveClient` and the Mode B `DualResolver`, never moving a TX radio; app +
+  web "Fallback" column. Verified on the two-board Mode A pair: slave falls back
+  on a collision and reclaims its primary when the master leaves. Covered by the
+  host resolver tests + the live integration suite (§11.9). Contention
+  status/badges still TODO.)* **This is the SO2R payoff.** *Built before M1 — it
+  delivers the functional win; M1 is the cosmetic model.*
 - **M1 — Antenna-centric Settings UI + validation** (app + web) layered over the
   existing `band_relay[]`, with `antennas[]` metadata, coverage validation, and
   the antenna's band set shown in the map grid. Config version bump + migration.
-- **M2 — Per-band secondary fallback in the resolver** (Mode A claim path + Mode B
-  `DualResolver`) + contention status/badges. *This is the SO2R payoff and folds
-  in the §9 P3 fallback item.*
 - **M3 — Triplexer "antenna group" modelling**: `feed`/`group` fields, allow
   concurrent different-leg use, and a `docs/HARDWARE.md` note on triplexer + BPF
   + stub isolation requirements.
@@ -491,3 +496,26 @@ metadata, or be *derived* from the antenna list:
 3. How far to model triplexers — just `group` for display + concurrency, or also
    encode **which leg owns which bands** for validation of adjacent-band conflicts?
 4. Per-radio vs shared antenna preference order in SO2R (ties into §10 Q5).
+
+### 11.9 Test infrastructure (scenario verification)
+Two complementary layers verify the SO2R decision logic — the algorithm in
+isolation, and the whole pipeline on real hardware:
+
+1. **Host unit tests** (`Controller/test/`, `make run`). The *real* firmware
+   headers (`Interlock.h`, `Config.h`, `BandPlan.h`) compiled against desktop
+   shims (`shims/`), so the logic under test is exactly what ships — no
+   duplication, no hardware, runs in CI. Covers every `DualResolver` /
+   `MasterArbiter` branch (collision, first-come vs priority, TX-safety, fallback
+   taken/blocked, recovery) and the v6→v7 config migration. *(48 assertions.)*
+
+2. **Live integration suite** (`App/Tests/`, `swift test`). Drives **real boards**
+   over HTTP with the app's own `AntennaSwitchClient` — the app configures the
+   boards (`/save`), and the firmware's **`/test/inject` API** (compiled only with
+   `-DANTSW_TEST`) puts a board into any band/TX scenario without tuning real
+   radios. Asserts the end-to-end wiring (config → resolver → relay → `/status`).
+   Self-skips unless `ANTSW_TEST_MASTER` / `ANTSW_TEST_SLAVE` name boards, so CI
+   stays green without hardware. The production image omits the `/test/*` routes
+   entirely.
+
+This is the pattern to extend for every later P4 scenario (Mode B contention,
+triplexer groups) and for regression-guarding the existing modes.

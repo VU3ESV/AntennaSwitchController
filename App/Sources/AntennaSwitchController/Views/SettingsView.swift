@@ -73,8 +73,21 @@ struct SettingsView: View {
                             Text("\(vm.config.relayLabel(r)) (GPIO\(kRelayGPIO[r]))").tag(r)
                         }
                     }
+                    // SO2R fallback antenna — only meaningful when two radios share
+                    // this controller (Master/Slave/Dual); hidden for standalone.
+                    if vm.config.mode != .standalone {
+                        Picker("↳ Fallback", selection: secondaryBinding(for: band.rawValue)) {
+                            Text("None").tag(-1)
+                            ForEach(0..<kRelayCount, id: \.self) { r in
+                                Text(vm.config.relayLabel(r)).tag(r)
+                            }
+                        }
+                        .font(.caption)
+                    }
                 }
-                Text("Multiple bands may share one relay. Relays on GPIO0/15/16 may twitch at power-up.")
+                Text(vm.config.mode == .standalone
+                     ? "Multiple bands may share one relay. Relays on GPIO0/15/16 may twitch at power-up."
+                     : "Fallback is used in SO2R when the primary antenna is already in use by the other radio — e.g. a HexBeam shared across 20–6 m, with a wire dipole as the fallback.")
                     .font(.caption).foregroundStyle(.secondary)
             }
 
@@ -194,6 +207,14 @@ struct SettingsView: View {
         Binding(
             get: { index < vm.config.bands.count ? vm.config.bands[index] : -1 },
             set: { if index < vm.config.bands.count { vm.config.bands[index] = $0 } }
+        )
+    }
+
+    /// Two-way binding into the `bands2` (SO2R fallback) array element.
+    private func secondaryBinding(for index: Int) -> Binding<Int> {
+        Binding(
+            get: { index < vm.config.bands2.count ? vm.config.bands2[index] : -1 },
+            set: { if index < vm.config.bands2.count { vm.config.bands2[index] = $0 } }
         )
     }
 

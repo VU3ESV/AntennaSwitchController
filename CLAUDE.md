@@ -125,7 +125,7 @@ at power-up, and SHOULD prefer GPIO14/12/13/4/5 for the most-used bands.
   | `/`        | GET    | Config form: WiFi, TCI host/port, band→relay map, manual override |
   | `/save`    | POST   | Persist settings                                 |
   | `/status`  | GET    | JSON: current band, active relay, TCI/WiFi/TX/Tune, mode |
-  | `/config`  | GET    | JSON: stored settings (band→relay map, relay names, radio_type, radio host/port, receiver index, mode/peer/interlock, radio2_*, switch_type, region, hostname, guard, SSID — **never** passwords) for the macOS app |
+  | `/config`  | GET    | JSON: stored settings (band→relay map + per-band SO2R fallback map, relay names, radio_type, radio host/port, receiver index, mode/peer/interlock, radio2_*, switch_type, region, hostname, guard, SSID — **never** passwords) for the macOS app |
   | `/relay`   | POST   | Manual override: `set=auto\|none\|0..7`          |
   | `/discover`| GET    | Device identity + mDNS metadata + firmware version |
   | `/reboot`  | POST   | Soft reboot                                      |
@@ -237,7 +237,13 @@ RTX.h RTX.cpp      bundled IW7DMH RTX state (band edges, VFO/TRX/tune getters)
 > **Live-validated on a SunSDR2 + the 8×2 wiring.** **P2c** added **per-relay
 > names** (config v6, `relay_name[8]`): operator-set antenna labels exposed via
 > `/config`+`/save`, shown across the web UI and app instead of "R1–R8" (blank →
-> default "R<n>"); v5→v6 migration preserves all settings.
+> default "R<n>"); v5→v6 migration preserves all settings. **P4** (multiband
+> antennas, docs/MULTI-RADIO-SO2R-PLAN.md §11) began with a **per-band SO2R
+> fallback antenna** (config v7, `band_relay2[]`): in Master/Slave/Dual, when a
+> band's primary antenna is held by the other radio the controller switches that
+> radio to the band's fallback instead of none (e.g. a HexBeam shared 20–6 m with
+> a wire dipole fallback), never moving a TX radio; standalone ignores it. v6→v7
+> migration preserves all settings.
 
 ## 6. Confirmed decisions
 

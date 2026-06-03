@@ -34,5 +34,14 @@ let package = Package(
             dependencies: ["AntennaSwitchController"],
             path: "Sources/AntennaSwitchControllerMain"
         ),
+        // Integration tests that drive a live controller over HTTP via the app's
+        // own client + the firmware's /test/inject API. Skipped unless the board
+        // addresses are provided in the environment (so `swift test` is a no-op
+        // without hardware) — see Tests/.../IntegrationTests.swift.
+        .testTarget(
+            name: "AntennaSwitchControllerTests",
+            dependencies: ["AntennaSwitchController"],
+            path: "Tests/AntennaSwitchControllerTests"
+        ),
     ]
 )

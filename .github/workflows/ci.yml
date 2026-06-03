@@ -33,6 +33,11 @@ jobs:
       - name: Build (debug)
         run: swift build
 
+      - name: Tests
+        # Unit tests run; the live-hardware integration tests self-skip unless
+        # ANTSW_TEST_MASTER / ANTSW_TEST_SLAVE point at boards (not set in CI).
+        run: swift test
+
       - name: Build release .app bundle
         run: ./build-app.sh
 
@@ -69,6 +74,12 @@ jobs:
           arduino-cli core update-index
           arduino-cli core install esp8266:esp8266
           arduino-cli lib install WebSockets
+
+      - name: Resolver unit tests (host)
+        # Compiles the real firmware decision logic against desktop shims and
+        # runs every SO2R interlock / fallback scenario + config migration —
+        # no hardware required. See Controller/test/.
+        run: make -C Controller/test run
 
       - name: Compile Controller sketch
         run: |

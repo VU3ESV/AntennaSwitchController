@@ -26,21 +26,26 @@ typedef void   (*RebootFn)();
 typedef int    (*ClaimFn)(int);      // SO2R: slave claim → 1 granted / 0 denied
 typedef void   (*ReleaseFn)();       // SO2R: slave release
 typedef String (*InterlockFn)();     // SO2R: interlock state JSON
+typedef void   (*TestInjectFn)(int radio, int band, int tx);  // test rig (ANTSW_TEST)
+typedef void   (*TestClearFn)();                              // test rig clear
 
 class WebPortal {
  public:
   void begin(Config& cfg, StatusFn statusFn, SaveFn saveFn,
              OverrideFn ovrFn, RebootFn rebootFn,
              ClaimFn claimFn = nullptr, ReleaseFn releaseFn = nullptr,
-             InterlockFn interlockFn = nullptr) {
-    cfg_         = &cfg;
-    statusFn_    = statusFn;
-    saveFn_      = saveFn;
-    ovrFn_       = ovrFn;
-    rebootFn_    = rebootFn;
-    claimFn_     = claimFn;
-    releaseFn_   = releaseFn;
-    interlockFn_ = interlockFn;
+             InterlockFn interlockFn = nullptr,
+             TestInjectFn testInjectFn = nullptr, TestClearFn testClearFn = nullptr) {
+    cfg_          = &cfg;
+    statusFn_     = statusFn;
+    saveFn_       = saveFn;
+    ovrFn_        = ovrFn;
+    rebootFn_     = rebootFn;
+    claimFn_      = claimFn;
+    releaseFn_    = releaseFn;
+    interlockFn_  = interlockFn;
+    testInjectFn_ = testInjectFn;
+    testClearFn_  = testClearFn;
 
     server_.on("/",         HTTP_GET,  [this]{ handleRoot(); });
     server_.on("/save",     HTTP_POST, [this]{ handleSave(); });
@@ -53,6 +58,13 @@ class WebPortal {
     server_.on("/interlock",         HTTP_GET,  [this]{ handleInterlockGet(); });
     server_.on("/interlock/claim",   HTTP_POST, [this]{ handleClaim(); });
     server_.on("/interlock/release", HTTP_POST, [this]{ handleRelease(); });
+#ifdef ANTSW_TEST
+    // Test rig (only in -DANTSW_TEST builds): inject a band/TX scenario so a test
+    // suite can exercise the resolver/interlock without tuning real radios.
+    server_.on("/test/inject", HTTP_POST, [this]{ handleTestInject(); });
+    server_.on("/test/clear",  HTTP_POST, [this]{ if (testClearFn_) testClearFn_();
+                                                  server_.send(200, "text/plain", "ok"); });
+#endif
     server_.begin();
   }
 
@@ -65,9 +77,11 @@ class WebPortal {
   SaveFn      saveFn_      = nullptr;
   OverrideFn  ovrFn_       = nullptr;
   RebootFn    rebootFn_    = nullptr;
-  ClaimFn     claimFn_     = nullptr;
-  ReleaseFn   releaseFn_   = nullptr;
-  InterlockFn interlockFn_ = nullptr;
+  ClaimFn      claimFn_      = nullptr;
+  ReleaseFn    releaseFn_    = nullptr;
+  InterlockFn  interlockFn_  = nullptr;
+  TestInjectFn testInjectFn_ = nullptr;
+  TestClearFn  testClearFn_  = nullptr;
 
   static String esc(const char* s) {
     String o;
@@ -144,17 +158,29 @@ class WebPortal {
     }
     h += F("</table></fieldset>");
 
-    h += F("<fieldset><legend>Band &rarr; Relay map</legend><table>");
+    h += F("<fieldset><legend>Band &rarr; Relay map</legend>"
+           "<table><tr><td></td><td class=muted>Primary</td><td class=muted>Fallback (SO2R)</td></tr>");
     for (int b = 0; b < NUM_BANDS; b++) {
-      h += "<tr><td><b>" + String(bandName(b)) + "</b></td><td><select name=b" + String(b) + ">";
+      h += "<tr><td><b>" + String(bandName(b)) + "</b></td>";
+      // Primary antenna.
+      h += "<td><select name=b" + String(b) + ">";
       h += "<option value=-1" + String(c.band_relay[b] == -1 ? " selected" : "") + ">None / bypass</option>";
       for (int r = 0; r < NUM_RELAYS; r++)
         h += "<option value=" + String(r) + (c.band_relay[b] == r ? " selected" : "") +
              ">" + relayLabel(c, r) + " (GPIO" + String(kRelayPin[r]) + ")</option>";
+      h += F("</select></td>");
+      // Secondary / fallback antenna (used when the primary is taken by the other radio).
+      h += "<td><select name=s" + String(b) + ">";
+      h += "<option value=-1" + String(c.band_relay2[b] == -1 ? " selected" : "") + ">None</option>";
+      for (int r = 0; r < NUM_RELAYS; r++)
+        h += "<option value=" + String(r) + (c.band_relay2[b] == r ? " selected" : "") +
+             ">" + relayLabel(c, r) + "</option>";
       h += F("</select></td></tr>");
     }
     h += F("</table><p class=muted>Multiple bands may share one relay. "
-           "Relays on GPIO0/15/16 may twitch at power-up.</p></fieldset>");
+           "<b>Fallback</b> is used in SO2R (Master/Slave or Dual) when the primary "
+           "antenna is already in use by the other radio &mdash; e.g. a HexBeam on 20&ndash;6&nbsp;m "
+           "with a wire dipole as fallback. Relays on GPIO0/15/16 may twitch at power-up.</p></fieldset>");
 
     // --- SO2R Mode A (master/slave) ---
     h += F("<fieldset><legend>SO2R role (Mode A)</legend>");
@@ -254,6 +280,9 @@ class WebPortal {
       String key = "b" + String(b);
       if (server_.hasArg(key))
         c.band_relay[b] = (int8_t)constrain(server_.arg(key).toInt(), -1, NUM_RELAYS - 1);
+      String skey = "s" + String(b);
+      if (server_.hasArg(skey))
+        c.band_relay2[b] = (int8_t)constrain(server_.arg(skey).toInt(), -1, NUM_RELAYS - 1);
     }
     for (int r = 0; r < NUM_RELAYS; r++) {
       String key = "rn" + String(r);
@@ -264,6 +293,17 @@ class WebPortal {
     server_.sendHeader("Location", "/");
     server_.send(303, "text/plain", "saved");
   }
+
+#ifdef ANTSW_TEST
+  // POST /test/inject?r=0|1&band=<idx>&tx=0|1 — inject a simulated radio state.
+  void handleTestInject() {
+    int r    = server_.hasArg("r")    ? (int)server_.arg("r").toInt()    : 0;
+    int band = server_.hasArg("band") ? (int)server_.arg("band").toInt() : -1;
+    int tx   = server_.hasArg("tx")   ? (int)server_.arg("tx").toInt()   : 0;
+    if (testInjectFn_) testInjectFn_(constrain(r, 0, 1), band, tx);
+    server_.send(200, "text/plain", "ok");          // poll /status for the result
+  }
+#endif
 
   void handleRelay() {
     String s = server_.arg("set");
@@ -324,6 +364,11 @@ class WebPortal {
     for (int b = 0; b < NUM_BANDS; b++) {
       if (b) j += ",";
       j += String(c.band_relay[b]);
+    }
+    j += "],\"bands2\":[";                          // per-band SO2R fallback relay
+    for (int b = 0; b < NUM_BANDS; b++) {
+      if (b) j += ",";
+      j += String(c.band_relay2[b]);
     }
     j += "]}";
     server_.send(200, "application/json", j);
