@@ -165,6 +165,11 @@ String interlockJson() {
 // ---- web portal callbacks --------------------------------------------------
 String statusJson() {
   String j = "{";
+  // Crash diagnostics: last reset reason + current free heap. After an
+  // unexpected reboot this shows e.g. "Exception (28)" / "Software Watchdog".
+  j += "\"reset\":\""       + ESP.getResetReason() + "\",";
+  j += "\"resetinfo\":\""   + ESP.getResetInfo() + "\",";   // epc1/excvaddr for decode
+  j += "\"heap\":"          + String(ESP.getFreeHeap()) + ",";
   j += "\"ap\":"           + String(g_apMode ? 1 : 0) + ",";
   j += "\"wifi\":"         + String(WiFi.status() == WL_CONNECTED ? 1 : 0) + ",";
   j += "\"ip\":\""         + (g_apMode ? WiFi.softAPIP() : WiFi.localIP()).toString() + "\",";
