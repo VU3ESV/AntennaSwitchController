@@ -5,6 +5,9 @@ import RadioPluginUI
 /// WiFi, TCI server, band→relay map, hostname, OTA password, guard delay.
 struct SettingsView: View {
     @ObservedObject var vm: ControllerViewModel
+    /// Controllers discovered on the LAN (`_antsw._tcp`), for the Slave's
+    /// master-pick menu. Injected by the detail view from the shared store.
+    var discoveredMasters: [DiscoveredDevice] = []
 
     var body: some View {
         Group {
@@ -139,7 +142,19 @@ struct SettingsView: View {
                     ForEach(CtrlMode.allCases, id: \.self) { Text($0.label).tag($0) }
                 }
                 if vm.config.mode == .slave {
-                    TextField("Master address (IP)", text: $vm.config.peerHost)
+                    TextField("Master address (IP or .local)", text: $vm.config.peerHost)
+                    if !masterCandidates.isEmpty {
+                        Menu {
+                            ForEach(masterCandidates) { dev in
+                                Button { vm.config.peerHost = dev.address } label: {
+                                    Text("\(dev.title) — \(dev.address)")
+                                }
+                            }
+                        } label: {
+                            Label("Pick master from network", systemImage: "antenna.radiowaves.left.and.right")
+                                .font(.caption)
+                        }
+                    }
                 }
                 if vm.config.mode != .standalone {
                     Picker("Interlock policy", selection: $vm.config.interlockPolicy) {
@@ -289,6 +304,22 @@ struct SettingsView: View {
         if n == 0 { return "Any band" }
         if n == Band.allCases.count { return "All bands" }
         return "\(n) band\(n == 1 ? "" : "s")"
+    }
+
+    /// Discovered controllers eligible to be this slave's master — everything on
+    /// the LAN except this unit itself (matched by hostname or current address).
+    private var masterCandidates: [DiscoveredDevice] {
+        let selfHost = vm.config.hostname.lowercased()
+        let selfAddr = vm.host.lowercased()
+        return discoveredMasters.filter { dev in
+            let host = (dev.host ?? "").lowercased()
+            let addr = dev.address.lowercased()
+            let name = dev.name.lowercased()
+            let isSelf = (!host.isEmpty && host == selfHost)
+                || (!addr.isEmpty && addr == selfAddr)
+                || (!selfHost.isEmpty && name.contains(selfHost))
+            return !isSelf && !dev.address.isEmpty
+        }
     }
 
     /// Band indices the current map assigns to an antenna that doesn't cover them.
