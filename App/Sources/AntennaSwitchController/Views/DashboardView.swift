@@ -26,8 +26,8 @@ struct DashboardView: View {
                     // In dual mode (Mode B) the top row is Radio 1. The firmware's
                     // active_relay is actually Radio 2's antenna, so use the interlock
                     // fields for unambiguous per-radio relays (master = R1, slave = R2).
-                    let dual = s.interlock?.isDual == true
-                    let r1Relay = dual ? (s.interlock?.masterAnt ?? -1) : s.activeRelay
+                    let dual = s.isDual
+                    let r1Relay = s.radio1RelayIndex
                     LazyVGrid(columns: columns, alignment: .leading, spacing: 12) {
                         StatCard(title: dual ? "Radio 1 Band" : "Band", value: s.band, systemImage: "waveform")
                         StatCard(title: dual ? "Radio 1 Freq" : "Frequency", value: s.freqMHz, systemImage: "dot.radiowaves.right")
@@ -72,7 +72,7 @@ struct DashboardView: View {
                     // Mode B: Radio 2's band / frequency / relay on this board,
                     // symmetric with the Radio 1 row above (slave_ant = Radio 2).
                     if let r2 = s.radio2 {
-                        let r2Relay = s.interlock?.slaveAnt ?? -1
+                        let r2Relay = s.radio2RelayIndex ?? -1
                         LazyVGrid(columns: columns, alignment: .leading, spacing: 12) {
                             StatCard(title: "Radio 2 Band", value: r2.band, systemImage: "waveform")
                             StatCard(title: "Radio 2 Freq", value: r2.freqMHz, systemImage: "dot.radiowaves.right")
