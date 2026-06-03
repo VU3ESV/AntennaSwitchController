@@ -11,14 +11,16 @@ struct ControlsView: View {
     /// Human summary of which relay(s) are energized — two in dual mode (one per
     /// radio), one otherwise.
     private func energizedSummary(_ s: DeviceStatus) -> String {
-        if s.energizedRelays.isEmpty { return "No relay energized." }
+        func label(_ i: Int) -> String { i >= 0 ? vm.config.relayLabel(i) : "OFF" }
+        // Override applies to Radio 1: -2 auto, -1 manual off, 0..7 manual relay.
+        let r1Mode = s.overrideMode == -2 ? "auto" : "manual"
         if s.isDual {
             let r1 = s.radio1RelayIndex, r2 = s.radio2RelayIndex ?? -1
-            let a = r1 >= 0 ? vm.config.relayLabel(r1) : "none"
-            let b = r2 >= 0 ? vm.config.relayLabel(r2) : "none"
-            return "Radio 1 → \(a) · Radio 2 → \(b)  (both energized)."
+            return "Radio 1 → \(label(r1)) (\(r1Mode))   ·   Radio 2 → \(label(r2)) (auto)"
         }
-        return "\(vm.config.relayLabel(s.activeRelay)) energized."
+        if s.overrideMode == -1 { return "Manually OFF — no relay energized." }
+        if s.activeRelay < 0    { return "No relay energized (auto)." }
+        return "\(vm.config.relayLabel(s.activeRelay)) energized (\(r1Mode))."
     }
 
     var body: some View {
@@ -35,9 +37,11 @@ struct ControlsView: View {
                 .disabled(vm.status?.isAuto == true)
 
                 Button { Task { await vm.setRelay("none") } } label: {
-                    Label("All Off", systemImage: "poweroff")
+                    Label(vm.status?.isDual == true ? "Radio 1 Off" : "All Off", systemImage: "poweroff")
                 }
-                .disabled(vm.status?.activeRelay == -1 && vm.status?.isAuto == false)
+                .buttonStyle(.bordered).tint(theme.danger)
+                // Greyed when it's the current state (manual off), mirroring Auto.
+                .disabled(vm.status?.overrideMode == -1)
             }
 
             // Mode B: a manual override drives Radio 1 only; Radio 2 stays automatic.
