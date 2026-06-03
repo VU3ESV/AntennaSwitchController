@@ -320,6 +320,12 @@ Same ESP8266 sketch; the mode selects the topology.
 5. **P3 — Polish.** Per-band secondary fallback, mDNS master-pick in the app,
    1-master-N-slaves, serial-CAT (carryover from P1), optional Antenna
    Genius/AetherSDR emulator.
+6. **P4 — Multiband antennas (HexBeam / tribanders).** A first-class
+   antenna-centric model + band-coverage validation, per-band secondary fallback
+   wired into the resolver (folds in the P3 item), and triplexer "antenna group"
+   modelling so a multiband antenna can be shared by both radios on different
+   bands. **See §11.** *(proposed — the basic single-feed case already works via
+   the many-to-one band→relay map; this phase is UX + SO2R contention.)*
 
 ---
 
@@ -342,3 +348,146 @@ Same ESP8266 sketch; the mode selects the topology.
 5. **Per-radio vs shared antenna map.**
 6. **CAT families first** (Icom CI-V / Kenwood / Yaesu) and whether FlexRadio
    SmartSDR (TCP 4992) is in P1.
+
+---
+
+## 11. Multiband antennas (HexBeam, tribanders, fan dipoles)
+
+A **multiband antenna** is one physical antenna usable on several bands — e.g. a
+**HexBeam** (commonly 20·17·15·12·10·6 m, some variants 40·30·…·6 m), a
+**tribander** (20·15·10 m), or a **fan/parallel dipole**. The operator wants to
+assign *one* antenna to a *range* of bands and have SO2R behave sensibly when
+both radios land on bands that the same antenna covers.
+
+### 11.1 What already works today (single radio)
+The band→relay map is **many-to-one** (R2.7) and relays are **named** (P2c). So a
+single-feed HexBeam is configured *right now*, with no firmware change, by
+pointing every band it covers at the same relay and naming it:
+
+| Band | 160 | 80 | 60 | 40 | 30 | **20** | **17** | **15** | **12** | **10** | **6** |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| Relay | 0 | 0 | -1 | 1 | -1 | **2** | **2** | **2** | **2** | **2** | **2** |
+| Name | 80m Dipole | 80m Dipole | — | 40m Vert | — | **HexBeam** | **HexBeam** | **HexBeam** | **HexBeam** | **HexBeam** | **HexBeam** |
+
+A "40 m–6 m" HexBeam is the same idea with 40/30 also pointing at relay 2. For a
+**standalone (single-radio) unit this is complete** — the multiband requirement
+is met by the existing model. Everything below is about making it *first-class*
+(model + UX) and, crucially, about **SO2R**.
+
+### 11.2 The hard part — shared-antenna contention in SO2R
+One feedline carries **one radio at a time**. With *monoband* antennas two radios
+on different bands rarely collide; with *multiband* antennas, two radios on
+**different bands that the same antenna covers** now collide on **one physical
+port** (e.g. Radio 1 on 20 m and Radio 2 on 15 m both resolve to the HexBeam).
+
+- **Safety is already handled.** The interlock resolves by **relay/port index**,
+  so both bands → the same relay → the second radio is **denied** (Mode A §6.1 /
+  Mode B §6.2), and break-before-make + exclusive energizing means the two radios
+  are never keyed onto one antenna. **No RF hazard is introduced.** ⚠️ Never
+  feed two transceivers one antenna simultaneously — the existing port-level
+  mutual exclusion is exactly what prevents it; multiband antennas just make the
+  collision *frequent* rather than rare.
+- **The cost is operator experience.** Radio 2 now hits "denied → none" far more
+  often. Without a fallback the second op simply has no antenna on that band.
+  This makes the per-band **secondary fallback** (already listed in §9 P3) go
+  from nice-to-have to **essential** for multiband SO2R.
+
+### 11.3 Two physical realities, one switching model
+The same band→port model expresses both deployments — the difference is purely
+how many ports the antenna presents:
+
+| Feed | Hardware | Ports | Two radios, different bands of this antenna | How to model |
+|---|---|---|---|---|
+| **Single feedline** | antenna → one coax → one switch port | **1** | **Mutually exclusive** (one radio at a time) | all its bands → **one** relay |
+| **Triplexed** | antenna → **triplexer** (splits by band) + **BPF/stub** filters → 2–3 ports | **2–3** | **Simultaneous OK** (each radio on a *different* triplexer leg) | each band-group → a **separate** relay |
+
+Key insight: a **triplexer turns one multiband antenna into N band-specific
+virtual ports**, and the existing index-based interlock then *correctly allows*
+two radios to share it — because they resolve to **different relay indices**. So
+the firmware needs **no special "multiband" switching logic**; it needs a
+**model + UI** that lets the operator describe the antenna and a resolver that
+falls back gracefully on contention.
+
+> Triplexed sharing requires **external** hardware the controller does **not**
+> provide: a band triplexer, bandpass filters, and often coaxial **stub** filters
+> for inter-station isolation, and it only works for **non-adjacent** band
+> combinations on separate legs (e.g. 20+10, not 20+20). Providing/validating
+> that isolation is the operator's responsibility — see `docs/HARDWARE.md` (TBD).
+
+### 11.4 Proposed antenna-centric config (quality-of-life)
+Today's config is **band-centric** (`band_relay[band] = port`). Multiband use is
+clearer if the operator also declares the **antennas** and which bands each
+covers; the band→port map can stay authoritative with antennas as validated
+metadata, or be *derived* from the antenna list:
+
+```jsonc
+"antennas": [
+  { "port": 2, "name": "HexBeam",    "bands": ["20m","17m","15m","12m","10m","6m"], "feed": "single" },
+  { "port": 0, "name": "80m Dipole", "bands": ["160m","80m"],                       "feed": "single" },
+  { "port": 1, "name": "40m Vert",   "bands": ["40m"],                              "feed": "single" },
+  // a triplexed tribander = one physical antenna, three independent legs/ports:
+  { "port": 5, "name": "TB·20", "bands": ["20m"], "feed": "triplexed", "group": "Tribander" },
+  { "port": 6, "name": "TB·15", "bands": ["15m"], "feed": "triplexed", "group": "Tribander" },
+  { "port": 7, "name": "TB·10", "bands": ["10m"], "feed": "triplexed", "group": "Tribander" }
+]
+```
+
+- `feed: single|triplexed` + `group` lets the UI render a triplexed antenna as
+  **one physical unit with multiple ports**, and documents that those ports may
+  be used concurrently (different legs) while a `single` antenna's bands are
+  mutually exclusive.
+- **Validation:** warn when a band is mapped to an antenna whose `bands` set does
+  not include it (e.g. assigning 6 m to a 40–10 m tribander), and when two bands
+  on the **same `single` port** are requested by two radios (expected contention,
+  surfaced as info).
+- **Multiple antennas cover one band** (HexBeam *and* a monoband 20 m Yagi both
+  do 20 m) → needs a **per-band preference order** (the `primary`/`secondary`
+  arrays already in §5/§6); multiband setups make this common rather than rare.
+
+### 11.5 SO2R behaviour with multiband antennas
+- **Mode A & Mode B:** the existing port-index interlock is already correct; no
+  change to the safety logic.
+- **Secondary fallback (P3) becomes the headline feature:** Radio 2 wants 15 m,
+  HexBeam busy with Radio 1 → resolver picks `secondary["15m"]` (e.g. a 15 m
+  wire on another port) → else none. Implemented in `DualResolver` (Mode B) and
+  the slave's claim path (Mode A).
+- **Status / UX:** surface the contention explicitly so the second op
+  understands *why* — e.g. `"radio2": { "band":"15m", "blocked_by":"HexBeam (Radio 1)", "relay": -1 }`
+  in `/status`, shown as a dashboard badge ("15 m — HexBeam in use by Radio 1").
+- **Triplexed groups:** the resolver may energize **different legs** of the same
+  `group` for the two radios simultaneously; it must never energize the **same
+  leg** for both (ordinary port exclusion already guarantees this).
+
+### 11.6 Challenges (summary)
+| # | Challenge | Notes |
+|---|---|---|
+| C1 | **Config model + migration** | add `antennas[]` (name, port, bands, feed, group); EEPROM version bump + migration; today's `band_relay[]` maps in as `single` antennas. |
+| C2 | **SO2R contention is now frequent** | safe (port interlock) but degrades Radio 2 UX → makes per-band **secondary fallback** mandatory, not optional. |
+| C3 | **Simultaneous sharing needs external HW** | triplexer + BPF + stubs, operator-supplied; only non-adjacent band combos; controller just routes the legs. Out of scope to *provide*; in scope to *model*. |
+| C4 | **Multiple antennas per band** | preference ordering (primary/secondary) per band; UI to set it. |
+| C5 | **Validation & labelling** | band-vs-coverage warnings; show an antenna's band set in the map grid; one name across all its bands (already via P2c relay names). |
+| C6 | **Variant band coverage** | "20–6 m" vs "40–6 m" HexBeam etc. — operator declares each antenna's `bands`; no hardcoding. |
+| C7 | **Backward compatibility** | the basic single-feed case must keep working with zero reconfiguration; the antenna list is additive metadata over the existing map. |
+
+### 11.7 Phased approach (P4, refines §9)
+- **M0 — Document the today-pattern** (no code): map all of a HexBeam's bands to
+  one named relay; covers every single-radio user immediately. *(README/CLAUDE.)*
+- **M1 — Antenna-centric Settings UI + validation** (app + web) layered over the
+  existing `band_relay[]`, with `antennas[]` metadata, coverage validation, and
+  the antenna's band set shown in the map grid. Config version bump + migration.
+- **M2 — Per-band secondary fallback in the resolver** (Mode A claim path + Mode B
+  `DualResolver`) + contention status/badges. *This is the SO2R payoff and folds
+  in the §9 P3 fallback item.*
+- **M3 — Triplexer "antenna group" modelling**: `feed`/`group` fields, allow
+  concurrent different-leg use, and a `docs/HARDWARE.md` note on triplexer + BPF
+  + stub isolation requirements.
+
+### 11.8 Open questions (multiband)
+1. Is `antennas[]` **authoritative** (band→port derived from it) or **metadata**
+   over the existing `band_relay[]`? (Leaning metadata-first for a clean
+   migration, promote later.)
+2. Secondary fallback: **explicit per-band secondary** only, or also an automatic
+   "any antenna that covers this band and is free" search?
+3. How far to model triplexers — just `group` for display + concurrency, or also
+   encode **which leg owns which bands** for validation of adjacent-band conflicts?
+4. Per-radio vs shared antenna preference order in SO2R (ties into §10 Q5).
