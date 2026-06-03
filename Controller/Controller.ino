@@ -61,11 +61,29 @@ void applyRadio() {
 }
 
 // Mode B radio 2. Disconnects both candidates first, then selects + connects.
+// Must run AFTER applyRadio() so radio 1's TCI link is configured first (the
+// shared-client path below reads it).
 void applyRadio2() {
-  g_tci2.disconnect();
+  g_tci2.disconnect();                       // no-op if it was sharing radio 1
   g_flex2.disconnect();
+  g_tci2.useOwnClient();                     // reset; re-decide sharing below
   if (g_cfg.mode != MODE_DUAL) return;       // radio 2 only exists in dual mode
   g_tci2.setRig(g_cfg.radio2_rx);            // RX2 for a 2-receiver radio
+
+  // SunSDR2 case: both "radios" are the same TCI server (one rig, two
+  // receivers). One link already carries RX1+RX2 (rtx[0]/rtx[1]), so share
+  // radio 1's client instead of opening a second WebSocket — this is the fix
+  // for the laggy switching seen with two sockets to one radio.
+  bool shareTci = g_cfg.radio_type  == RADIO_TCI &&
+                  g_cfg.radio2_type == RADIO_TCI &&
+                  g_cfg.radio2_port == g_cfg.tci_port &&
+                  strcmp(g_cfg.radio2_host, g_cfg.tci_host) == 0;
+  if (shareTci) {
+    g_tci2.shareWith(g_tci);                 // reads rtx[radio2_rx] off radio 1
+    g_radio2 = &g_tci2;                       // no second connection
+    return;
+  }
+
   g_radio2 = (g_cfg.radio2_type == RADIO_FLEX) ? (RadioSource*)&g_flex2
                                                : (RadioSource*)&g_tci2;
   g_radio2->configure(g_cfg.radio2_host, g_cfg.radio2_port, g_cfg.iaru_region);

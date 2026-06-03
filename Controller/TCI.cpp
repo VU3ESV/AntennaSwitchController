@@ -136,22 +136,28 @@ void TCI::connect() {
 }
 
 // ESP8266 cooperative replacement for the FreeRTOS reader + event tasks.
-// Pump the WebSocket, then drain and parse at most one queued frame.
+// Pump the WebSocket, then drain and parse up to PROCESS_BATCH queued frames.
+// Draining one frame per loop() (every ~2 ms) let a busy radio's events back
+// up in the ring — band/TX updates lagged, so relay switching felt slow. A
+// small bounded batch keeps the ring drained while still yielding promptly.
 void TCI::process() {
 	webSocket.loop();
 
-	if (read_index == write_index && (!ws_buffer_full))
-		return;  // ring buffer empty
+	const int PROCESS_BATCH = 8;
+	for (int n = 0; n < PROCESS_BATCH; n++) {
+		if (read_index == write_index && (!ws_buffer_full))
+			return;  // ring buffer empty
 
-	ws_buffer_full = false;
-	memset(incoming_message, 0, MESSAGE_LEN);
-	strncpy(incoming_message,
-	        ws_messages[read_index].ws_data,
-	        ws_messages[read_index].len);
-	parse_message(ws_messages[read_index].len);
-	ws_messages[read_index].len = 0;
-	memset(ws_messages[read_index].ws_data, 0, MESSAGE_LEN);
-	read_index = (read_index + 1) % WS_LIST_SIZE;
+		ws_buffer_full = false;
+		memset(incoming_message, 0, MESSAGE_LEN);
+		strncpy(incoming_message,
+		        ws_messages[read_index].ws_data,
+		        ws_messages[read_index].len);
+		parse_message(ws_messages[read_index].len);
+		ws_messages[read_index].len = 0;
+		memset(ws_messages[read_index].ws_data, 0, MESSAGE_LEN);
+		read_index = (read_index + 1) % WS_LIST_SIZE;
+	}
 }
 
 void TCI::webSocketEvent(WStype_t type, uint8_t * payload, size_t length) {
