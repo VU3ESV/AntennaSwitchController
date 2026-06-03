@@ -9,6 +9,12 @@ struct DashboardView: View {
 
     private let columns = [GridItem(.adaptive(minimum: 180), spacing: 12)]
 
+    /// "None", or the relay's name + GPIO (e.g. "80m Dipole (GPIO14)").
+    private func relayValue(_ idx: Int) -> String {
+        guard idx >= 0, idx < kRelayCount else { return "None" }
+        return "\(vm.config.relayLabel(idx)) (GPIO\(kRelayGPIO[idx]))"
+    }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
@@ -17,11 +23,16 @@ struct DashboardView: View {
                 }
 
                 if let s = vm.status {
+                    // In dual mode (Mode B) the top row is Radio 1. The firmware's
+                    // active_relay is actually Radio 2's antenna, so use the interlock
+                    // fields for unambiguous per-radio relays (master = R1, slave = R2).
+                    let dual = s.interlock?.isDual == true
+                    let r1Relay = dual ? (s.interlock?.masterAnt ?? -1) : s.activeRelay
                     LazyVGrid(columns: columns, alignment: .leading, spacing: 12) {
-                        StatCard(title: "Band", value: s.band, systemImage: "waveform")
-                        StatCard(title: "Frequency", value: s.freqMHz, systemImage: "dot.radiowaves.right")
-        StatCard(title: "Active Relay",
-                                 value: s.activeRelay < 0 ? "None" : "\(vm.config.relayLabel(s.activeRelay)) (GPIO\(kRelayGPIO[s.activeRelay]))",
+                        StatCard(title: dual ? "Radio 1 Band" : "Band", value: s.band, systemImage: "waveform")
+                        StatCard(title: dual ? "Radio 1 Freq" : "Frequency", value: s.freqMHz, systemImage: "dot.radiowaves.right")
+                        StatCard(title: dual ? "Radio 1 Relay" : "Active Relay",
+                                 value: relayValue(r1Relay),
                                  systemImage: "switch.2")
                         StatCard(title: "Mode",
                                  value: s.isAuto ? "Auto (TCI)" : (s.overrideMode == -1 ? "Forced Off" : "Forced \(vm.config.relayLabel(s.overrideMode))"),
@@ -43,24 +54,29 @@ struct DashboardView: View {
                     if let ilk = s.interlock, !ilk.isStandalone {
                         HStack(spacing: 10) {
                             StatusBadge(ilk.isDual ? "Dual (Mode B)" : ilk.role.capitalized, kind: .neutral)
+                            // Mode A only: peer health + the two boards' antennas as
+                            // badges. In dual mode each radio's relay is shown as a
+                            // card (below), so the badges would be redundant.
                             if !ilk.isDual {
                                 StatusBadge(ilk.peerIsUp ? "Peer up" : "Peer down",
                                             kind: ilk.peerIsUp ? .success : .danger)
-                                // Heartbeat health: flag tolerated misses before loss.
                                 if let m = ilk.beatsMissed, m > 0, ilk.peerIsUp {
                                     StatusBadge("♥ \(m) missed", kind: .warning)
                                 }
+                                if ilk.masterAnt >= 0 { StatusBadge("Radio 1 → \(vm.config.relayLabel(ilk.masterAnt))", kind: .neutral) }
+                                if ilk.slaveAnt >= 0  { StatusBadge("Radio 2 → \(vm.config.relayLabel(ilk.slaveAnt))",  kind: .neutral) }
                             }
-                            if ilk.masterAnt >= 0 { StatusBadge("Radio 1 → \(vm.config.relayLabel(ilk.masterAnt))", kind: .neutral) }
-                            if ilk.slaveAnt >= 0  { StatusBadge("Radio 2 → \(vm.config.relayLabel(ilk.slaveAnt))",  kind: .neutral) }
                         }
                     }
 
-                    // Mode B: Radio 2's band/frequency on this board.
+                    // Mode B: Radio 2's band / frequency / relay on this board,
+                    // symmetric with the Radio 1 row above (slave_ant = Radio 2).
                     if let r2 = s.radio2 {
+                        let r2Relay = s.interlock?.slaveAnt ?? -1
                         LazyVGrid(columns: columns, alignment: .leading, spacing: 12) {
                             StatCard(title: "Radio 2 Band", value: r2.band, systemImage: "waveform")
                             StatCard(title: "Radio 2 Freq", value: r2.freqMHz, systemImage: "dot.radiowaves.right")
+                            StatCard(title: "Radio 2 Relay", value: relayValue(r2Relay), systemImage: "switch.2")
                         }
                         HStack(spacing: 10) {
                             StatusBadge("Radio 2 TCI", kind: r2.tciUp ? .success : .neutral)
