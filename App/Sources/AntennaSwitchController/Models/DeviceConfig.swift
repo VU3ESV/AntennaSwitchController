@@ -87,6 +87,13 @@ struct DeviceConfig: Codable, Equatable {
     var switchType: SwitchType    // external switch wiring (8x1 / 8x2)
     var radioRx: Int              // radio 1 TCI receiver index (0=RX1, 1=RX2)
     var radio2Rx: Int             // radio 2 TCI receiver index (0=RX1, 1=RX2)
+    var relayNames: [String]      // kRelayCount entries; "" = default "R<n>"
+
+    /// Display name for relay index `r` — the operator's name, or "R<n>" if blank.
+    func relayLabel(_ r: Int) -> String {
+        guard r >= 0, r < relayNames.count, !relayNames[r].isEmpty else { return "R\(r + 1)" }
+        return relayNames[r]
+    }
 
     // Write-only, never present in /config — excluded from CodingKeys below.
     var wifiPassword: String = ""
@@ -107,6 +114,15 @@ struct DeviceConfig: Codable, Equatable {
         case switchType = "switch_type"
         case radioRx = "radio_rx"
         case radio2Rx = "radio2_rx"
+        case relayNames = "relay_names"
+    }
+
+    /// Normalize a names array to exactly `kRelayCount` entries (pad/truncate).
+    private static func normalizedNames(_ raw: [String]?) -> [String] {
+        var names = raw ?? []
+        if names.count < kRelayCount { names += Array(repeating: "", count: kRelayCount - names.count) }
+        else if names.count > kRelayCount { names = Array(names.prefix(kRelayCount)) }
+        return names
     }
 
     // Older firmware omits the newer fields — decode them as sensible defaults
@@ -131,6 +147,7 @@ struct DeviceConfig: Codable, Equatable {
         switchType      = try c.decodeIfPresent(SwitchType.self, forKey: .switchType) ?? .eightByOne
         radioRx         = try c.decodeIfPresent(Int.self, forKey: .radioRx) ?? 0
         radio2Rx        = try c.decodeIfPresent(Int.self, forKey: .radio2Rx) ?? 0
+        relayNames      = DeviceConfig.normalizedNames(try c.decodeIfPresent([String].self, forKey: .relayNames))
     }
 
     init(hostname: String, ssid: String, radioType: RadioType = .tci,
@@ -138,7 +155,8 @@ struct DeviceConfig: Codable, Equatable {
          mode: CtrlMode = .standalone, peerHost: String = "",
          interlockPolicy: InterlockPolicy = .firstCome, onPeerLoss: PeerLoss = .safe,
          radio2Type: RadioType = .tci, radio2Host: String = "", radio2Port: Int = 50001,
-         switchType: SwitchType = .eightByOne, radioRx: Int = 0, radio2Rx: Int = 0) {
+         switchType: SwitchType = .eightByOne, radioRx: Int = 0, radio2Rx: Int = 0,
+         relayNames: [String] = []) {
         self.hostname = hostname; self.ssid = ssid; self.radioType = radioType
         self.tciHost = tciHost; self.tciPort = tciPort; self.region = region
         self.guardMs = guardMs; self.bands = bands
@@ -147,6 +165,7 @@ struct DeviceConfig: Codable, Equatable {
         self.radio2Type = radio2Type; self.radio2Host = radio2Host
         self.radio2Port = radio2Port; self.switchType = switchType
         self.radioRx = radioRx; self.radio2Rx = radio2Rx
+        self.relayNames = DeviceConfig.normalizedNames(relayNames)
     }
 
     /// Build the `POST /save` form body matching the firmware's field names
@@ -176,6 +195,9 @@ struct DeviceConfig: Codable, Equatable {
         if !otaPassword.isEmpty  { items.append(URLQueryItem(name: "otapass", value: otaPassword)) }
         for (i, relay) in bands.enumerated() {
             items.append(URLQueryItem(name: "b\(i)", value: String(relay)))
+        }
+        for (i, name) in relayNames.enumerated() {
+            items.append(URLQueryItem(name: "rn\(i)", value: name))
         }
         var comps = URLComponents()
         comps.queryItems = items

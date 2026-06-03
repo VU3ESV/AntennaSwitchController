@@ -30,10 +30,13 @@ struct ControlsView: View {
             LazyVGrid(columns: columns, spacing: 10) {
                 ForEach(0..<kRelayCount, id: \.self) { r in
                     let active = vm.status?.activeRelay == r
+                    let named = r < vm.config.relayNames.count && !vm.config.relayNames[r].isEmpty
                     Button { Task { await vm.setRelay(String(r)) } } label: {
                         VStack(spacing: 2) {
-                            Text("R\(r + 1)").font(.headline)
-                            Text("GPIO\(kRelayGPIO[r])").font(.caption2).foregroundStyle(theme.textSecondary)
+                            Text(vm.config.relayLabel(r)).font(.headline)
+                                .lineLimit(1).minimumScaleFactor(0.6)
+                            Text(named ? "R\(r + 1) · GPIO\(kRelayGPIO[r])" : "GPIO\(kRelayGPIO[r])")
+                                .font(.caption2).foregroundStyle(theme.textSecondary)
                         }
                         .frame(maxWidth: .infinity).padding(.vertical, 10)
                     }
@@ -45,7 +48,7 @@ struct ControlsView: View {
             if let s = vm.status {
                 Text(s.activeRelay < 0
                      ? "No relay energized."
-                     : "Relay R\(s.activeRelay + 1) energized.")
+                     : "\(vm.config.relayLabel(s.activeRelay)) energized.")
                     .font(.callout).foregroundStyle(theme.textSecondary)
             }
 

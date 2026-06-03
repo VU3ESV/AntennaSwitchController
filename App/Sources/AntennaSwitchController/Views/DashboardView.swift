@@ -20,11 +20,11 @@ struct DashboardView: View {
                     LazyVGrid(columns: columns, alignment: .leading, spacing: 12) {
                         StatCard(title: "Band", value: s.band, systemImage: "waveform")
                         StatCard(title: "Frequency", value: s.freqMHz, systemImage: "dot.radiowaves.right")
-                        StatCard(title: "Active Relay",
-                                 value: s.activeRelay < 0 ? "None" : "R\(s.activeRelay + 1) (GPIO\(kRelayGPIO[s.activeRelay]))",
+        StatCard(title: "Active Relay",
+                                 value: s.activeRelay < 0 ? "None" : "\(vm.config.relayLabel(s.activeRelay)) (GPIO\(kRelayGPIO[s.activeRelay]))",
                                  systemImage: "switch.2")
                         StatCard(title: "Mode",
-                                 value: s.isAuto ? "Auto (TCI)" : (s.overrideMode == -1 ? "Forced Off" : "Forced R\(s.overrideMode + 1)"),
+                                 value: s.isAuto ? "Auto (TCI)" : (s.overrideMode == -1 ? "Forced Off" : "Forced \(vm.config.relayLabel(s.overrideMode))"),
                                  systemImage: "slider.horizontal.3")
                     }
 
@@ -51,8 +51,8 @@ struct DashboardView: View {
                                     StatusBadge("♥ \(m) missed", kind: .warning)
                                 }
                             }
-                            if ilk.masterAnt >= 0 { StatusBadge("R1 → R\(ilk.masterAnt + 1)", kind: .neutral) }
-                            if ilk.slaveAnt >= 0  { StatusBadge("R2 → R\(ilk.slaveAnt + 1)",  kind: .neutral) }
+                            if ilk.masterAnt >= 0 { StatusBadge("Radio 1 → \(vm.config.relayLabel(ilk.masterAnt))", kind: .neutral) }
+                            if ilk.slaveAnt >= 0  { StatusBadge("Radio 2 → \(vm.config.relayLabel(ilk.slaveAnt))",  kind: .neutral) }
                         }
                     }
 

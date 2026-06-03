@@ -34,6 +34,9 @@ final class ControllerViewModel: ObservableObject {
     func start() {
         stop()
         pollTask = Task { [weak self] in
+            // Load config once so relay names are available on every tab (not
+            // just Settings). Gated by configLoaded, so it never clobbers edits.
+            if let self, !self.configLoaded { await self.loadConfig() }
             while !Task.isCancelled {
                 await self?.refreshOnce()
                 try? await Task.sleep(nanoseconds: 2_000_000_000)   // 2 s
