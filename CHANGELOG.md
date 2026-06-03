@@ -28,6 +28,20 @@ work. See the [GitHub Releases] for downloads.
   with two sockets to one radio; `TCI::process()` also drains a small bounded
   batch of queued frames per call (was one), so a busy radio's events don't back up.
 
+### Changed
+- **JSON responses pre-reserve their buffers.** `/status`, `/config`, the
+  interlock payload, and the HTML-escape helper now `String::reserve()` up front
+  instead of growing append-by-append, so building a response no longer churns
+  the heap with repeated reallocations (free heap on the boards sits at ~27 KB;
+  this keeps fragmentation pressure off it). Behaviour is unchanged.
+
+### Removed
+- **Temporary `/status` crash diagnostics** (`reset` / `resetinfo` / `heap`).
+  These were added to chase the Mode-B band-change reboot; that bug is fixed and
+  field-confirmed (zero exception resets across both boards), so the fields are
+  gone. Frees ~0.5 KB of flash and trims the status payload. The app and web UI
+  never consumed them.
+
 ### Fixed
 - **Firmware version reported correctly.** The controller's `/discover` (and mDNS
   TXT) reported a hardcoded `"1.0"` regardless of the build — the release pipeline

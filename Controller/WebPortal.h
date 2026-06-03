@@ -71,6 +71,7 @@ class WebPortal {
 
   static String esc(const char* s) {
     String o;
+    o.reserve(strlen(s) + 8);       // fits the common (unescaped) case in one alloc
     for (const char* p = s; *p; p++) {
       switch (*p) {
         case '&': o += "&amp;";  break;
@@ -293,7 +294,9 @@ class WebPortal {
   // Passwords (wifi_pass, ota_pass) are deliberately never returned.
   void handleConfig() {
     Config& c = *cfg_;
-    String j = "{";
+    String j;
+    j.reserve(512);                 // whole config in one alloc (no per-append churn)
+    j += "{";
     j += "\"hostname\":\""  + esc(c.hostname) + "\",";
     j += "\"ssid\":\""      + esc(c.wifi_ssid) + "\",";
     j += "\"tci_host\":\""  + esc(c.tci_host) + "\",";

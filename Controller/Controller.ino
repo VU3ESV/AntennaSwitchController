@@ -141,7 +141,9 @@ String interlockJson() {
   const char* role = g_cfg.mode == MODE_MASTER ? "master"
                    : g_cfg.mode == MODE_SLAVE  ? "slave"
                    : g_cfg.mode == MODE_DUAL   ? "dual" : "standalone";
-  String j = "{\"role\":\"";
+  String j;
+  j.reserve(128);                 // avoid per-append heap reallocation
+  j += "{\"role\":\"";
   j += role;
   if (g_cfg.mode == MODE_DUAL) {
     // One board sees both radios; report each radio's granted antenna.
@@ -164,12 +166,9 @@ String interlockJson() {
 
 // ---- web portal callbacks --------------------------------------------------
 String statusJson() {
-  String j = "{";
-  // Crash diagnostics: last reset reason + current free heap. After an
-  // unexpected reboot this shows e.g. "Exception (28)" / "Software Watchdog".
-  j += "\"reset\":\""       + ESP.getResetReason() + "\",";
-  j += "\"resetinfo\":\""   + ESP.getResetInfo() + "\",";   // epc1/excvaddr for decode
-  j += "\"heap\":"          + String(ESP.getFreeHeap()) + ",";
+  String j;
+  j.reserve(448);                 // sized for the dual-mode payload; one alloc, no churn
+  j += "{";
   j += "\"ap\":"           + String(g_apMode ? 1 : 0) + ",";
   j += "\"wifi\":"         + String(WiFi.status() == WL_CONNECTED ? 1 : 0) + ",";
   j += "\"ip\":\""         + (g_apMode ? WiFi.softAPIP() : WiFi.localIP()).toString() + "\",";
