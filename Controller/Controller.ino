@@ -49,6 +49,26 @@ DualResolver  g_resolver;       // dual: in-firmware first-come resolver
 bool     g_apMode   = false;
 int      g_override = -2;       // -2 auto, -1 force none, 0..7 force relay
 
+// A brief TCI flap (the radio momentarily drops the WebSocket on a band change,
+// a transient reconnect, etc.) must NOT de-energize an antenna that is actively
+// in use — dropping a live antenna is more dangerous than briefly holding a
+// stale one, and with one shared TCI link a flap would otherwise drop BOTH
+// receivers' relays at once. Debounce the link used for relay decisions: report
+// "up" until it has been continuously down for LINK_GRACE_MS, then fall through
+// to the R2.10 safe state. Status JSON still reports the raw connected() so the
+// operator always sees the true link state.
+static const uint32_t LINK_GRACE_MS = 5000;
+struct LinkDebounce {
+  uint32_t downSince_ = 0;
+  bool stable(bool raw) {
+    uint32_t now = millis();
+    if (raw) { downSince_ = 0; return true; }
+    if (downSince_ == 0) downSince_ = now;                  // first sample down
+    return (uint32_t)(now - downSince_) < LINK_GRACE_MS;    // hold within grace
+  }
+};
+LinkDebounce g_link1, g_link2;
+
 // Point g_radio at the configured transport, (re)connect it. Disconnects the
 // previously-selected source first so /save can switch transports cleanly.
 void applyRadio() {
@@ -145,6 +165,11 @@ String interlockJson() {
 // ---- web portal callbacks --------------------------------------------------
 String statusJson() {
   String j = "{";
+  // Crash diagnostics: last reset reason + current free heap. After an
+  // unexpected reboot this shows e.g. "Exception (28)" / "Software Watchdog".
+  j += "\"reset\":\""       + ESP.getResetReason() + "\",";
+  j += "\"resetinfo\":\""   + ESP.getResetInfo() + "\",";   // epc1/excvaddr for decode
+  j += "\"heap\":"          + String(ESP.getFreeHeap()) + ",";
   j += "\"ap\":"           + String(g_apMode ? 1 : 0) + ",";
   j += "\"wifi\":"         + String(WiFi.status() == WL_CONNECTED ? 1 : 0) + ",";
   j += "\"ip\":\""         + (g_apMode ? WiFi.softAPIP() : WiFi.localIP()).toString() + "\",";
@@ -278,19 +303,24 @@ void setup() {
 void loop() {
   g_web.tick();
 
-  bool link = false, link2 = false;
+  bool rawLink = false, rawLink2 = false;
   if (!g_apMode) {
     MDNS.update();
     ArduinoOTA.handle();
     if (WiFi.status() == WL_CONNECTED) {
       g_radio->process();                // pump transport + refresh state
-      link = g_radio->connected();
+      rawLink = g_radio->connected();
       if (g_cfg.mode == MODE_DUAL) {     // Mode B also tracks radio 2
         g_radio2->process();
-        link2 = g_radio2->connected();
+        rawLink2 = g_radio2->connected();
       }
     }
   }
+
+  // Debounced link for relay decisions: hold an in-use antenna across a brief
+  // flap (LED/status below still use the raw link state).
+  bool link  = g_link1.stable(rawLink);
+  bool link2 = g_link2.stable(rawLink2);
 
   if (g_cfg.mode == MODE_DUAL) {
     // Mode B: one board, both radios → external 8×2 switch. Resolve the two
@@ -306,7 +336,7 @@ void loop() {
     g_dual.setInhibit(false);
     g_dual.setDual(a1, a2);
     g_dual.tick();                                  // break-before-make (R2 line)
-    digitalWrite(STATUS_LED, (link && link2) ? LOW : HIGH);
+    digitalWrite(STATUS_LED, (rawLink && rawLink2) ? LOW : HIGH);
   } else {
     // R2.9: no hot-switching while the radio is transmitting/tuning.
     g_out.setInhibit(g_radio->isTx() || g_radio->isTune());
@@ -320,7 +350,7 @@ void loop() {
     int desired = interlockResolve(localDesired);
     g_out.setDesired(desired);
     g_out.tick();                                   // break-before-make
-    digitalWrite(STATUS_LED, link ? LOW : HIGH);    // LED on = radio linked
+    digitalWrite(STATUS_LED, rawLink ? LOW : HIGH); // LED on = radio linked
   }
 
   handleSerial();

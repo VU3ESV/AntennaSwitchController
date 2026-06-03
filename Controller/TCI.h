@@ -86,7 +86,18 @@ class TCI
 	void process();
 	void attach_conn_disc_event(eventHandlerFunction _eventHandler);
 	void set_cat_port(int portId, Stream *port_name, int rtxId);
-	RTX rtx[N_MAX_RTX];	
+	RTX rtx[N_MAX_RTX];
+
+	// Bounds-checked receiver accessor. The parser dispatches with strstr()
+	// (matches a token anywhere) but parses with sscanf() from the start, so a
+	// substring/mismatch leaves rtxId unwritten (garbage) — indexing rtx[garbage]
+	// stored through a wild `this` and reset the ESP (Exception 3 / LoadStoreError
+	// seen on band changes). Route any out-of-range index to a throwaway slot so a
+	// malformed frame is harmless instead of fatal.
+	RTX& rtxAt(int id) {
+		static RTX rtx_dummy;
+		return (id >= 0 && id < N_MAX_RTX) ? rtx[id] : rtx_dummy;
+	}
 
 	//
 	// ********************** INITIALIZATIONS COMMANDS ***********************
