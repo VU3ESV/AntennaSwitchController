@@ -517,14 +517,14 @@ void TCI::cat_task(void * parameters) {
 #endif // !ESP8266
 
 void TCI::send_cat_IF(int rtxId) {
-	if (!connected() || !rtx[rtxId].autoInformationEnabled())
+	if (!connected() || !rtxAt(rtxId).autoInformationEnabled())
 		return;
 	//loop on every Cat port
 	for (int i=0; i<NUM_OF_CAT_PORT;i++) {		
 		if (cat_port[i].rtxId == rtxId) {
 			sprintf(SerialInBuffer[i],"IF;");
 			memset(SerialOutBuffer[i], 0, CAT_PORT_BUFFER_LEN);
-			rtx[rtxId].getCatResponse(SerialOutBuffer[i],SerialInBuffer[i]);
+			rtxAt(rtxId).getCatResponse(SerialOutBuffer[i],SerialInBuffer[i]);
 			cat_port[i].port->printf("%s",SerialOutBuffer[i]);
 		}
 	}
@@ -612,7 +612,7 @@ void TCI::parse_message(unsigned int length) {
 		int rtxId = -1, vfoId = 0, freq = 0;
 		sscanf(incoming_message, "vfo:%d,%d,%d;", &rtxId, &vfoId, &freq);
 		if (rtxId < 0 || rtxId >= N_MAX_RTX) return;   // ignore malformed/out-of-range
-		rtx[rtxId].setVfo(vfoId,freq);
+		rtxAt(rtxId).setVfo(vfoId,freq);
 		if (do_vfo_event!=NULL)
 			do_vfo_event(rtxId,vfoId);
 		send_cat_IF(rtxId);
@@ -626,7 +626,7 @@ void TCI::parse_message(unsigned int length) {
 		int rtxId = -1, vfoId = 0, freq = 0;
 		sscanf(incoming_message, "if:%d,%d,%d;", &rtxId, &vfoId, &freq);
 		if (rtxId < 0 || rtxId >= N_MAX_RTX) return;   // ignore malformed/out-of-range
-		rtx[rtxId].setIf(vfoId,freq);
+		rtxAt(rtxId).setIf(vfoId,freq);
 		if (do_if_event!=NULL)
 			do_if_event(rtxId,vfoId);
 		return;
@@ -659,7 +659,7 @@ void TCI::parse_message(unsigned int length) {
 		// on a fully-parsed frame with an in-range receiver index.
 		if (sscanf(incoming_message, "modulation:%d,%15[^;];", &rtxId, modulation) == 2 &&
 		    rtxId >= 0 && rtxId < N_MAX_RTX) {
-			rtx[rtxId].setModulation(modulation);
+			rtxAt(rtxId).setModulation(modulation);
 			if (do_modulation_event!=NULL)
 				do_modulation_event(rtxId);
 			send_cat_IF(rtxId);
@@ -675,7 +675,7 @@ void TCI::parse_message(unsigned int length) {
 		memset(tmp_bool_buffer, 0, sizeof(tmp_bool_buffer));
 		sscanf(incoming_message, "trx:%d,%9s;", &rtxId, tmp_bool_buffer);
 		if (rtxId < 0 || rtxId >= N_MAX_RTX) return;   // ignore malformed/out-of-range
-		rtx[rtxId].setTrx(eval_bool_buf());
+		rtxAt(rtxId).setTrx(eval_bool_buf());
 		if (do_trx_event != NULL)
 			do_trx_event(rtxId);
 		send_cat_IF(rtxId);			
@@ -700,7 +700,7 @@ void TCI::parse_message(unsigned int length) {
 		memset(tmp_bool_buffer, 0, sizeof(tmp_bool_buffer));
 		sscanf(incoming_message, "tune:%d,%9s;", &rtxId, tmp_bool_buffer);
 		if (rtxId < 0 || rtxId >= N_MAX_RTX) return;   // ignore malformed/out-of-range
-		rtx[rtxId].setTune(eval_bool_buf());
+		rtxAt(rtxId).setTune(eval_bool_buf());
 		if (do_tune_event != NULL)
 			do_tune_event(rtxId);		
 		return;			
@@ -713,7 +713,7 @@ void TCI::parse_message(unsigned int length) {
 		int rtxId, power;
 		memset(tmp_bool_buffer, 0, sizeof(tmp_bool_buffer));
 		sscanf(incoming_message, "tune_drive:%d,%d;", &rtxId, &power);
-		rtx[rtxId].setTuneDrive(power);
+		rtxAt(rtxId).setTuneDrive(power);
 		if (do_tune_drive_event != NULL)
 			do_tune_drive_event(rtxId);		
 		return;			
@@ -726,7 +726,7 @@ void TCI::parse_message(unsigned int length) {
 		int rtxId, power;
 		memset(tmp_bool_buffer, 0, sizeof(tmp_bool_buffer));
 		sscanf(incoming_message, "drive:%d,%d;", &rtxId, &power);
-		rtx[rtxId].setDrive(power);
+		rtxAt(rtxId).setDrive(power);
 		if (do_drive_event != NULL)
 			do_drive_event(rtxId);		
 		return;			
@@ -739,7 +739,7 @@ void TCI::parse_message(unsigned int length) {
 		int rtxId;
 		memset(tmp_bool_buffer, 0, sizeof(tmp_bool_buffer));
 		sscanf(incoming_message, "tx_enable:%d,%9s;", &rtxId, tmp_bool_buffer);
-		rtx[rtxId].setTxEnable(eval_bool_buf());
+		rtxAt(rtxId).setTxEnable(eval_bool_buf());
 		if (do_tx_enable_event != NULL)
 			do_tx_enable_event(rtxId);	
 		send_cat_IF(rtxId);		
@@ -753,7 +753,7 @@ void TCI::parse_message(unsigned int length) {
 		int rtxId;
 		memset(tmp_bool_buffer, 0, sizeof(tmp_bool_buffer));
 		sscanf(incoming_message, "tx_footswitch:%d,%9s;", &rtxId, tmp_bool_buffer);
-		rtx[rtxId].setTxFootswitch(eval_bool_buf());
+		rtxAt(rtxId).setTxFootswitch(eval_bool_buf());
 		if (do_tx_footswitch_event != NULL)
 			do_tx_footswitch_event(rtxId);		
 		return;			
@@ -786,7 +786,7 @@ void TCI::parse_message(unsigned int length) {
 		int rtxId = -1, freq = 0;
 		sscanf(incoming_message, "dds:%d,%d;", &rtxId, &freq);
 		if (rtxId < 0 || rtxId >= N_MAX_RTX) return;   // ignore malformed/out-of-range
-		rtx[rtxId].setDds(freq);
+		rtxAt(rtxId).setDds(freq);
 		if (do_dds_event!=NULL)
 			do_dds_event(rtxId);
 		return;
@@ -799,7 +799,7 @@ void TCI::parse_message(unsigned int length) {
 		int rtxId;
 		memset(tmp_bool_buffer, 0, sizeof(tmp_bool_buffer));
 		sscanf(incoming_message, "rit_enable:%d,%9s;", &rtxId, tmp_bool_buffer);
-		rtx[rtxId].setRitEnable(eval_bool_buf());
+		rtxAt(rtxId).setRitEnable(eval_bool_buf());
 		if (do_rit_enable_event!=NULL) 
 			do_rit_enable_event(rtxId);	
 		send_cat_IF(rtxId);		
@@ -813,7 +813,7 @@ void TCI::parse_message(unsigned int length) {
 		int rtxId;
 		memset(tmp_bool_buffer, 0, sizeof(tmp_bool_buffer));
 		sscanf(incoming_message, "xit_enable:%d,%9s;", &rtxId, tmp_bool_buffer);
-		rtx[rtxId].setXitEnable(eval_bool_buf());
+		rtxAt(rtxId).setXitEnable(eval_bool_buf());
 		if (do_xit_enable_event!=NULL) 
 			do_xit_enable_event(rtxId);		
 		send_cat_IF(rtxId);	
@@ -828,7 +828,7 @@ void TCI::parse_message(unsigned int length) {
 		int rtxId;
 		memset(tmp_bool_buffer, 0, sizeof(tmp_bool_buffer));
 		sscanf(incoming_message, "split_enable:%d,%9s;", &rtxId, tmp_bool_buffer);
-		rtx[rtxId].setSplitEnable(eval_bool_buf());
+		rtxAt(rtxId).setSplitEnable(eval_bool_buf());
 		if (do_split_enable_event!=NULL) 
 			do_split_enable_event(rtxId);
 		send_cat_IF(rtxId);			
@@ -841,7 +841,7 @@ void TCI::parse_message(unsigned int length) {
     if (s != NULL) {
 		int rtxId, freq;
 		sscanf(incoming_message, "rit_offset:%d,%d;", &rtxId, &freq);
-		rtx[rtxId].setRitOffset(freq);
+		rtxAt(rtxId).setRitOffset(freq);
 		if (do_rit_offset_event != NULL)
 			do_rit_offset_event(rtxId);		
 		send_cat_IF(rtxId);	
@@ -854,7 +854,7 @@ void TCI::parse_message(unsigned int length) {
     if (s != NULL) {
 		int rtxId, freq;
 		sscanf(incoming_message, "xit_offset:%d,%d;", &rtxId, &freq);
-		rtx[rtxId].setXitOffset(freq);
+		rtxAt(rtxId).setXitOffset(freq);
 		if (do_xit_offset_event != NULL)
 			do_xit_offset_event(rtxId);
 		send_cat_IF(rtxId);			
@@ -868,7 +868,7 @@ void TCI::parse_message(unsigned int length) {
 		int rtxId, vfoId;
 		memset(tmp_bool_buffer, 0, sizeof(tmp_bool_buffer));
 		sscanf(incoming_message, "rx_channel_enable:%d,%d,%9s;", &rtxId, &vfoId, tmp_bool_buffer);
-		rtx[rtxId].setRxChannelEnable(vfoId,eval_bool_buf());
+		rtxAt(rtxId).setRxChannelEnable(vfoId,eval_bool_buf());
 		if (do_rx_channel_enable_event!=NULL) 
 			do_rx_channel_enable_event(rtxId,vfoId);
 		return;			
@@ -880,8 +880,8 @@ void TCI::parse_message(unsigned int length) {
     if (s != NULL) {
 		int rtxId, lower, top;
 		sscanf(incoming_message, "rx_filter_band:%d,%d,%d;", &rtxId, &lower, &top);
-		rtx[rtxId].setRxFilterLower(lower);
-		rtx[rtxId].setRxFilterTop(top);	
+		rtxAt(rtxId).setRxFilterLower(lower);
+		rtxAt(rtxId).setRxFilterTop(top);	
 		if (do_rx_filter_band_event!=NULL) 
 			do_rx_filter_band_event(rtxId);
 		return;			
@@ -923,7 +923,7 @@ void TCI::parse_message(unsigned int length) {
     if (s != NULL) {
 		int rtxId, vfoId, db_level;
 		sscanf(incoming_message, "rx_volume:%d,%d,%d;", &rtxId, &vfoId, &db_level);	
-		rtx[rtxId].setRxVolume(vfoId,db_level);
+		rtxAt(rtxId).setRxVolume(vfoId,db_level);
 		if (do_rx_volume_event != NULL)
 			do_rx_volume_event(rtxId,vfoId);
 		return;			
@@ -957,7 +957,7 @@ void TCI::parse_message(unsigned int length) {
 		int rtxId;
 		memset(tmp_bool_buffer, 0, sizeof(tmp_bool_buffer));
 		sscanf(incoming_message, "rx_mute:%d,%9s;",&rtxId,tmp_bool_buffer);
-		rtx[rtxId].setRxMute(eval_bool_buf());
+		rtxAt(rtxId).setRxMute(eval_bool_buf());
 		if (do_rx_mute_event != NULL)
 			do_rx_mute_event(rtxId);
 		return;			
@@ -981,7 +981,7 @@ void TCI::parse_message(unsigned int length) {
     if (s != NULL) {
 		int rtxId, vfoId, db_level;
 		sscanf(incoming_message, "rx_balance:%d,%d,%d;", &rtxId, &vfoId, &db_level);	
-		rtx[rtxId].setRxBalance(vfoId,db_level);
+		rtxAt(rtxId).setRxBalance(vfoId,db_level);
 		if (do_rx_balance_event != NULL)
 			do_rx_balance_event(rtxId,vfoId);
 		return;			
@@ -1007,11 +1007,11 @@ void TCI::parse_message(unsigned int length) {
 		memset(tmp_bool_buffer, 0, sizeof(tmp_bool_buffer));
 		sscanf(incoming_message, "agc_mode:%d,%9s;", &rtxId, tmp_bool_buffer);		
 		if (strstr(tmp_bool_buffer, "off;") != NULL) {
-			rtx[rtxId].setAgcMode(0);	
+			rtxAt(rtxId).setAgcMode(0);	
 		} else if (strstr(tmp_bool_buffer, "fast;") != NULL) {
-			rtx[rtxId].setAgcMode(1);	
+			rtxAt(rtxId).setAgcMode(1);	
 		} else if (strstr(tmp_bool_buffer, "normal;") != NULL) {
-			rtx[rtxId].setAgcMode(2);
+			rtxAt(rtxId).setAgcMode(2);
 		}
 
 		if (do_agc_mode_event != NULL)
@@ -1025,7 +1025,7 @@ void TCI::parse_message(unsigned int length) {
     if (s != NULL) {
 		int rtxId, db_level;
 		sscanf(incoming_message, "agc_gain:%d,%d;", &rtxId, &db_level);	
-		rtx[rtxId].setAgcGain(db_level);
+		rtxAt(rtxId).setAgcGain(db_level);
 		if (do_agc_gain_event != NULL)
 			do_agc_gain_event(rtxId);
 		return;			
@@ -1038,7 +1038,7 @@ void TCI::parse_message(unsigned int length) {
 		int rtxId;
 		memset(tmp_bool_buffer, 0, sizeof(tmp_bool_buffer));
 		sscanf(incoming_message, "rx_nb_enable:%d,%9s;", &rtxId, tmp_bool_buffer);
-		rtx[rtxId].setRxNbEnable(eval_bool_buf());
+		rtxAt(rtxId).setRxNbEnable(eval_bool_buf());
 		if (do_rx_nb_enable_event != NULL)
 			do_rx_nb_enable_event(rtxId);		
 		return;			
@@ -1050,8 +1050,8 @@ void TCI::parse_message(unsigned int length) {
     if (s != NULL) {
 		int rtxId, trig_thres, pulse_dur;
 		sscanf(incoming_message, "rx_nb_param:%d,%d,%d;", &rtxId, &trig_thres, &pulse_dur);	
-		rtx[rtxId].setTriggeringThresold(trig_thres);
-		rtx[rtxId].setPulseDuration(pulse_dur);		
+		rtxAt(rtxId).setTriggeringThresold(trig_thres);
+		rtxAt(rtxId).setPulseDuration(pulse_dur);		
 		if (do_rx_nb_param_event != NULL)
 			do_rx_nb_param_event(rtxId);
 		return;			
@@ -1064,7 +1064,7 @@ void TCI::parse_message(unsigned int length) {
 		int rtxId;
 		memset(tmp_bool_buffer, 0, sizeof(tmp_bool_buffer));
 		sscanf(incoming_message, "rx_bin_enable:%d,%9s;", &rtxId, tmp_bool_buffer);
-		rtx[rtxId].setRxBinEnable(eval_bool_buf());
+		rtxAt(rtxId).setRxBinEnable(eval_bool_buf());
 		if (do_rx_bin_enable_event != NULL)
 			do_rx_bin_enable_event(rtxId);		
 		return;			
@@ -1078,7 +1078,7 @@ void TCI::parse_message(unsigned int length) {
 		int rtxId;
 		memset(tmp_bool_buffer, 0, sizeof(tmp_bool_buffer));
 		sscanf(incoming_message, "rx_nr_enable:%d,%9s;", &rtxId, tmp_bool_buffer);
-		rtx[rtxId].setRxNrEnable(eval_bool_buf());
+		rtxAt(rtxId).setRxNrEnable(eval_bool_buf());
 		if (do_rx_nr_enable_event != NULL)
 			do_rx_nr_enable_event(rtxId);		
 		return;			
@@ -1091,7 +1091,7 @@ void TCI::parse_message(unsigned int length) {
 		int rtxId;
 		memset(tmp_bool_buffer, 0, sizeof(tmp_bool_buffer));
 		sscanf(incoming_message, "rx_anc_enable:%d,%9s;", &rtxId, tmp_bool_buffer);
-		rtx[rtxId].setRxAncEnable(eval_bool_buf());
+		rtxAt(rtxId).setRxAncEnable(eval_bool_buf());
 		if (do_rx_anc_enable_event != NULL)
 			do_rx_anc_enable_event(rtxId);		
 		return;			
@@ -1104,7 +1104,7 @@ void TCI::parse_message(unsigned int length) {
 		int rtxId;
 		memset(tmp_bool_buffer, 0, sizeof(tmp_bool_buffer));
 		sscanf(incoming_message, "rx_anf_enable:%d,%9s;", &rtxId, tmp_bool_buffer);
-		rtx[rtxId].setRxAnfEnable(eval_bool_buf());
+		rtxAt(rtxId).setRxAnfEnable(eval_bool_buf());
 		if (do_rx_anf_enable_event != NULL)
 			do_rx_anf_enable_event(rtxId);		
 		return;			
@@ -1117,7 +1117,7 @@ void TCI::parse_message(unsigned int length) {
 		int rtxId;
 		memset(tmp_bool_buffer, 0, sizeof(tmp_bool_buffer));
 		sscanf(incoming_message, "rx_apf_enable:%d,%9s;", &rtxId, tmp_bool_buffer);
-		rtx[rtxId].setRxApfEnable(eval_bool_buf());
+		rtxAt(rtxId).setRxApfEnable(eval_bool_buf());
 		if (do_rx_apf_enable_event != NULL)
 			do_rx_apf_enable_event(rtxId);		
 		return;			
@@ -1130,7 +1130,7 @@ void TCI::parse_message(unsigned int length) {
 		int rtxId;
 		memset(tmp_bool_buffer, 0, sizeof(tmp_bool_buffer));
 		sscanf(incoming_message, "rx_dse_enable:%d,%9s;", &rtxId, tmp_bool_buffer);
-		rtx[rtxId].setRxDseEnable(eval_bool_buf());
+		rtxAt(rtxId).setRxDseEnable(eval_bool_buf());
 		if (do_rx_dse_enable_event != NULL)
 			do_rx_dse_enable_event(rtxId);		
 		return;			
@@ -1143,7 +1143,7 @@ void TCI::parse_message(unsigned int length) {
 		int rtxId;
 		memset(tmp_bool_buffer, 0, sizeof(tmp_bool_buffer));
 		sscanf(incoming_message, "rx_nf_enable:%d,%9s;", &rtxId, tmp_bool_buffer);
-		rtx[rtxId].setRxNfEnable(eval_bool_buf());
+		rtxAt(rtxId).setRxNfEnable(eval_bool_buf());
 		if (do_rx_nf_enable_event != NULL)
 			do_rx_nf_enable_event(rtxId);		
 		return;			
@@ -1156,7 +1156,7 @@ void TCI::parse_message(unsigned int length) {
 		int rtxId;
 		memset(tmp_bool_buffer, 0, sizeof(tmp_bool_buffer));
 		sscanf(incoming_message, "lock:%d,%9s;", &rtxId, tmp_bool_buffer);
-		rtx[rtxId].setLock(eval_bool_buf());
+		rtxAt(rtxId).setLock(eval_bool_buf());
 		if (do_lock_event != NULL)
 			do_lock_event(rtxId);		
 		return;			
@@ -1169,7 +1169,7 @@ void TCI::parse_message(unsigned int length) {
 		int rtxId;
 		memset(tmp_bool_buffer, 0, sizeof(tmp_bool_buffer));
 		sscanf(incoming_message, "sql_enable:%d,%9s;", &rtxId, tmp_bool_buffer);
-		rtx[rtxId].setSqlEnable(eval_bool_buf());
+		rtxAt(rtxId).setSqlEnable(eval_bool_buf());
 		if (do_sql_enable_event != NULL)
 			do_sql_enable_event(rtxId);		
 		return;			
@@ -1181,7 +1181,7 @@ void TCI::parse_message(unsigned int length) {
     if (s != NULL) {
 		int rtxId, db_level;
 		sscanf(incoming_message, "sql_level:%d,%d;", &rtxId, &db_level);	
-		rtx[rtxId].setSqlLevel(db_level);
+		rtxAt(rtxId).setSqlLevel(db_level);
 		if (do_sql_level_event != NULL)
 			do_sql_level_event(rtxId);
 		return;			
@@ -1213,7 +1213,7 @@ void TCI::parse_message(unsigned int length) {
     if (s != NULL) {
 		int rtxId;
 		sscanf(incoming_message, "iq_start:%d;", &rtxId);
-		rtx[rtxId].iqStart();	
+		rtxAt(rtxId).iqStart();	
 		if (do_iq_start_stop_event != NULL)
 			do_iq_start_stop_event(rtxId);
 		return;			
@@ -1225,7 +1225,7 @@ void TCI::parse_message(unsigned int length) {
     if (s != NULL) {
 		int rtxId;
 		sscanf(incoming_message, "iq_stop:%d;", &rtxId);
-		rtx[rtxId].iqStop();	
+		rtxAt(rtxId).iqStop();	
 		if (do_iq_start_stop_event != NULL)
 			do_iq_start_stop_event(rtxId);
 		return;			
@@ -1237,7 +1237,7 @@ void TCI::parse_message(unsigned int length) {
     if (s != NULL) {
 		int rtxId;
 		sscanf(incoming_message, "audio_start:%d;", &rtxId);
-		rtx[rtxId].audioStart();	
+		rtxAt(rtxId).audioStart();	
 		if (do_audio_start_stop_event != NULL)
 			do_audio_start_stop_event(rtxId);
 		return;			
@@ -1249,7 +1249,7 @@ void TCI::parse_message(unsigned int length) {
     if (s != NULL) {
 		int rtxId;
 		sscanf(incoming_message, "audio_stop:%d;", &rtxId);
-		rtx[rtxId].audioStop();	
+		rtxAt(rtxId).audioStop();	
 		if (do_audio_start_stop_event != NULL)
 			do_audio_start_stop_event(rtxId);
 		return;			
@@ -1261,7 +1261,7 @@ void TCI::parse_message(unsigned int length) {
     if (s != NULL) {
 		int rtxId;
 		sscanf(incoming_message, "line_out_start:%d;", &rtxId);
-		rtx[rtxId].lineOutStart();
+		rtxAt(rtxId).lineOutStart();
 		if (do_line_out_start_stop_event != NULL)
 			do_line_out_start_stop_event(rtxId);
 		return;			
@@ -1273,7 +1273,7 @@ void TCI::parse_message(unsigned int length) {
     if (s != NULL) {
 		int rtxId;
 		sscanf(incoming_message, "line_out_stop:%d;", &rtxId);
-		rtx[rtxId].lineOutStop();	
+		rtxAt(rtxId).lineOutStop();	
 		if (do_line_out_start_stop_event != NULL)
 			do_line_out_start_stop_event(rtxId);
 		return;			
@@ -1285,7 +1285,7 @@ void TCI::parse_message(unsigned int length) {
     if (s != NULL) {
 		int rtxId, record_duration;
 		sscanf(incoming_message, "line_out_recorder_start:%d,%d;", &rtxId, &record_duration);
-		rtx[rtxId].setRecordDuration(record_duration);
+		rtxAt(rtxId).setRecordDuration(record_duration);
 		if (do_line_out_recorder_start_event != NULL)
 			do_line_out_recorder_start_event(rtxId);
 		return;			
@@ -1298,7 +1298,7 @@ void TCI::parse_message(unsigned int length) {
 		int rtxId;
 		char f_name[128];
 		sscanf(incoming_message, "line_out_recorder_save:%d,%9s;", &rtxId,f_name);
-		rtx[rtxId].setRecordFileName(f_name);	
+		rtxAt(rtxId).setRecordFileName(f_name);	
 		if (do_line_out_recorder_save_event != NULL)
 			do_line_out_recorder_save_event(rtxId);
 		return;			
