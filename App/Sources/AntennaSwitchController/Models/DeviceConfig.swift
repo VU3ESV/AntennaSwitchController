@@ -89,6 +89,9 @@ struct DeviceConfig: Codable, Equatable {
     var radioRx: Int              // radio 1 TCI receiver index (0=RX1, 1=RX2)
     var radio2Rx: Int             // radio 2 TCI receiver index (0=RX1, 1=RX2)
     var relayNames: [String]      // kRelayCount entries; "" = default "R<n>"
+    var relayBands: [Int]         // per-relay band-coverage bitmask (bit b = Band b); 0 = undeclared
+    var relayFeed: [Int]          // per-relay FeedType: 0 = single feedline, 1 = triplexed leg
+    var relayGroup: [Int]         // per-relay triplexer group id; 0 = none
 
     /// Display name for relay index `r` — the operator's name, or "R<n>" if blank.
     func relayLabel(_ r: Int) -> String {
@@ -116,6 +119,9 @@ struct DeviceConfig: Codable, Equatable {
         case radioRx = "radio_rx"
         case radio2Rx = "radio2_rx"
         case relayNames = "relay_names"
+        case relayBands = "relay_bands"
+        case relayFeed = "relay_feed"
+        case relayGroup = "relay_group"
     }
 
     /// Normalize a names array to exactly `kRelayCount` entries (pad/truncate).
@@ -126,10 +132,10 @@ struct DeviceConfig: Codable, Equatable {
         return names
     }
 
-    /// Normalize an int array (e.g. the fallback map) to `count` entries, -1 padded.
-    private static func normalizedInts(_ raw: [Int]?, count: Int) -> [Int] {
+    /// Normalize an int array to `count` entries, padding/truncating with `pad`.
+    private static func normalizedInts(_ raw: [Int]?, count: Int, pad: Int = -1) -> [Int] {
         var v = raw ?? []
-        if v.count < count { v += Array(repeating: -1, count: count - v.count) }
+        if v.count < count { v += Array(repeating: pad, count: count - v.count) }
         else if v.count > count { v = Array(v.prefix(count)) }
         return v
     }
@@ -159,6 +165,10 @@ struct DeviceConfig: Codable, Equatable {
         radioRx         = try c.decodeIfPresent(Int.self, forKey: .radioRx) ?? 0
         radio2Rx        = try c.decodeIfPresent(Int.self, forKey: .radio2Rx) ?? 0
         relayNames      = DeviceConfig.normalizedNames(try c.decodeIfPresent([String].self, forKey: .relayNames))
+        // Antenna metadata (pre-v8 firmware omits these → undeclared/single/no group).
+        relayBands      = DeviceConfig.normalizedInts(try c.decodeIfPresent([Int].self, forKey: .relayBands), count: kRelayCount)
+        relayFeed       = DeviceConfig.normalizedInts(try c.decodeIfPresent([Int].self, forKey: .relayFeed),  count: kRelayCount, pad: 0)
+        relayGroup      = DeviceConfig.normalizedInts(try c.decodeIfPresent([Int].self, forKey: .relayGroup), count: kRelayCount, pad: 0)
     }
 
     init(hostname: String, ssid: String, radioType: RadioType = .tci,
@@ -168,7 +178,8 @@ struct DeviceConfig: Codable, Equatable {
          interlockPolicy: InterlockPolicy = .firstCome, onPeerLoss: PeerLoss = .safe,
          radio2Type: RadioType = .tci, radio2Host: String = "", radio2Port: Int = 50001,
          switchType: SwitchType = .eightByOne, radioRx: Int = 0, radio2Rx: Int = 0,
-         relayNames: [String] = []) {
+         relayNames: [String] = [],
+         relayBands: [Int]? = nil, relayFeed: [Int]? = nil, relayGroup: [Int]? = nil) {
         self.hostname = hostname; self.ssid = ssid; self.radioType = radioType
         self.tciHost = tciHost; self.tciPort = tciPort; self.region = region
         self.guardMs = guardMs; self.bands = bands
@@ -179,6 +190,9 @@ struct DeviceConfig: Codable, Equatable {
         self.radio2Port = radio2Port; self.switchType = switchType
         self.radioRx = radioRx; self.radio2Rx = radio2Rx
         self.relayNames = DeviceConfig.normalizedNames(relayNames)
+        self.relayBands = DeviceConfig.normalizedInts(relayBands, count: kRelayCount, pad: 0)
+        self.relayFeed  = DeviceConfig.normalizedInts(relayFeed,  count: kRelayCount, pad: 0)
+        self.relayGroup = DeviceConfig.normalizedInts(relayGroup, count: kRelayCount, pad: 0)
     }
 
     /// Build the `POST /save` form body matching the firmware's field names
@@ -215,6 +229,11 @@ struct DeviceConfig: Codable, Equatable {
         for (i, name) in relayNames.enumerated() {
             items.append(URLQueryItem(name: "rn\(i)", value: name))
         }
+        // Antenna metadata. The firmware sums every arg named rb<i>; sending the
+        // single combined mask is sufficient (no hidden-zero baseline needed).
+        for (i, mask)  in relayBands.enumerated() { items.append(URLQueryItem(name: "rb\(i)", value: String(mask))) }
+        for (i, feed)  in relayFeed.enumerated()  { items.append(URLQueryItem(name: "rf\(i)", value: String(feed))) }
+        for (i, group) in relayGroup.enumerated() { items.append(URLQueryItem(name: "rg\(i)", value: String(group))) }
         var comps = URLComponents()
         comps.queryItems = items
         // application/x-www-form-urlencoded body.

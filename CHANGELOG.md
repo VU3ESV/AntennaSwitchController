@@ -12,6 +12,18 @@ work. See the [GitHub Releases] for downloads.
 
 ## [Unreleased]
 ### Added
+- **Antenna metadata + coverage validation (P4 / M1, M3).** Each relay (antenna)
+  can now declare the **bands it covers**, a **feed type** (single feedline vs a
+  **triplexed** leg), and a **group** id. The app's new *Antennas* section (and
+  the web page) edit these; the band→relay map then **warns** when a band is
+  assigned to an antenna whose coverage excludes it, and flags a triplexer group
+  asked to put one band on two legs. Triplexed legs sharing a group are distinct
+  relay ports, so the SO2R interlock already lets both radios use one physical
+  multiband antenna at once (different legs) — see
+  [docs/HARDWARE.md](docs/HARDWARE.md) for the triplexer + BPF + stub isolation
+  it requires. Metadata only — switching behaviour is unchanged. Config **v8**
+  (`relay_bands` / `relay_feed` / `relay_group` via `/config` + `/save`); v7→v8
+  migration preserves all settings.
 - **Per-band fallback antenna for SO2R (P4 / multiband antennas).** Each band now
   has an optional **secondary** antenna in addition to its primary. In SO2R
   (Master/Slave or Dual) when the primary antenna is already in use by the other

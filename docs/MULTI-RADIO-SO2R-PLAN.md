@@ -480,12 +480,18 @@ metadata, or be *derived* from the antenna list:
   host resolver tests + the live integration suite (§11.9). Contention
   status/badges still TODO.)* **This is the SO2R payoff.** *Built before M1 — it
   delivers the functional win; M1 is the cosmetic model.*
-- **M1 — Antenna-centric Settings UI + validation** (app + web) layered over the
-  existing `band_relay[]`, with `antennas[]` metadata, coverage validation, and
-  the antenna's band set shown in the map grid. Config version bump + migration.
-- **M3 — Triplexer "antenna group" modelling**: `feed`/`group` fields, allow
-  concurrent different-leg use, and a `docs/HARDWARE.md` note on triplexer + BPF
-  + stub isolation requirements.
+- ✅ **M1 — Antenna metadata + coverage validation** *(done — config **v8**:
+  per-relay `relay_bands` coverage bitmask + feed/group, over the existing
+  `band_relay[]`. App "Antennas" section (name + band coverage multi-select +
+  feed + group) and web equivalent; the band map warns when an assigned antenna's
+  coverage excludes that band. v7→v8 migration. Per-relay metadata rather than a
+  separate `antennas[]` array — simpler, same effect.)*
+- ✅ **M3 — Triplexer "antenna group" modelling** *(done — `feed` (single/
+  triplexed) + `group` fields; legs of one group are distinct relay indices, so
+  the interlock already permits concurrent different-leg use and forbids the same
+  leg twice (no resolver change needed). App/web warn if two legs of a group
+  cover the same band. Isolation requirements documented in
+  [HARDWARE.md](HARDWARE.md §2.2).)*
 
 ### 11.8 Open questions (multiband)
 1. Is `antennas[]` **authoritative** (band→port derived from it) or **metadata**

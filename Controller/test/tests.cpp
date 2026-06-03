@@ -124,40 +124,58 @@ static void test_master() {
     g_fakeMillis = 0; }
 }
 
-// --- Config v6→v7 migration + round-trip -----------------------------------
+// --- Config migration + round-trip -----------------------------------------
 static void test_config() {
-  GROUP("Config v6→v7");
+  GROUP("Config defaults + v8");
 
-  // Defaults: new fallback map is all-none, magic is v7.
+  // Defaults: fallback map all-none, antenna metadata zeroed, magic is v8.
   { Config c; configDefaults(c);
     CHECK(c.magic == CFG_MAGIC);
-    bool allNone = true;
-    for (int i = 0; i < NUM_BANDS; i++) if (c.band_relay2[i] != -1) allNone = false;
-    CHECK(allNone); }
+    bool clean = true;
+    for (int i = 0; i < NUM_BANDS; i++) if (c.band_relay2[i] != -1) clean = false;
+    for (int i = 0; i < NUM_RELAYS; i++)
+      if (c.relay_bands[i] || c.relay_feed[i] || c.relay_group[i]) clean = false;
+    CHECK(clean); }
 
-  // Round-trip a fallback through save/load.
-  { Config c; configDefaults(c); c.band_relay2[5] = 5; c.band_relay[5] = 2; configSave(c);
+  // Round-trip fallback + antenna metadata through save/load.
+  { Config c; configDefaults(c);
+    c.band_relay[5] = 2; c.band_relay2[5] = 5;
+    c.relay_bands[2] = (1 << 5) | (1 << 6) | (1 << 7);   // HexBeam covers 20/17/15
+    c.relay_feed[2] = FEED_TRIPLEXED; c.relay_group[2] = 3;
+    configSave(c);
     Config d; bool ok = configLoad(d);
-    CHECK(ok); CHECK(d.band_relay2[5] == 5); CHECK(d.band_relay[5] == 2); }
+    CHECK(ok); CHECK(d.band_relay2[5] == 5);
+    CHECK(d.relay_bands[2] == ((1 << 5) | (1 << 6) | (1 << 7)));
+    CHECK(d.relay_feed[2] == FEED_TRIPLEXED); CHECK(d.relay_group[2] == 3); }
 
-  // Migrate a v6 image: band map + relay names preserved, fallback defaults none.
+  // Migrate a v6 image (skips v7): band map + names preserved, new fields default.
   { ConfigV6 v6; memset(&v6, 0, sizeof(v6));
-    v6.magic = CFG_MAGIC_V6;
-    v6.mode = MODE_MASTER;
+    v6.magic = CFG_MAGIC_V6; v6.mode = MODE_MASTER;
     for (int i = 0; i < NUM_BANDS; i++) v6.band_relay[i] = (int8_t)(i % 8);
     strncpy(v6.relay_name[0], "HexBeam", RELAY_NAME_LEN - 1);
     v6.crc = crc32(reinterpret_cast<const uint8_t*>(&v6), offsetof(ConfigV6, crc));
-    EEPROM.put(0, v6);                       // place the v6 image in EEPROM
-
+    EEPROM.put(0, v6);
     Config c; bool ok = configLoad(c);
-    CHECK(ok);
-    CHECK(c.magic == CFG_MAGIC);             // upgraded to v7
-    CHECK(c.mode == MODE_MASTER);
-    CHECK(c.band_relay[3] == 3);             // band map preserved
+    CHECK(ok); CHECK(c.magic == CFG_MAGIC); CHECK(c.mode == MODE_MASTER);
+    CHECK(c.band_relay[3] == 3);
     CHECK(std::string(c.relay_name[0]) == "HexBeam");
-    bool allNone = true;
-    for (int i = 0; i < NUM_BANDS; i++) if (c.band_relay2[i] != -1) allNone = false;
-    CHECK(allNone); }                        // new fallback map defaulted to none
+    CHECK(c.relay_bands[0] == 0 && c.relay_group[0] == 0); }
+
+  // Migrate a v7 image into v8: fallback map preserved, antenna metadata default.
+  { ConfigV7 v7; memset(&v7, 0, sizeof(v7));
+    v7.magic = CFG_MAGIC_V7; v7.mode = MODE_DUAL;
+    v7.band_relay[5] = 2; v7.band_relay2[5] = 5;
+    strncpy(v7.relay_name[2], "HexBeam", RELAY_NAME_LEN - 1);
+    v7.crc = crc32(reinterpret_cast<const uint8_t*>(&v7), offsetof(ConfigV7, crc));
+    EEPROM.put(0, v7);
+    Config c; bool ok = configLoad(c);
+    CHECK(ok); CHECK(c.magic == CFG_MAGIC); CHECK(c.mode == MODE_DUAL);
+    CHECK(c.band_relay[5] == 2); CHECK(c.band_relay2[5] == 5);
+    CHECK(std::string(c.relay_name[2]) == "HexBeam");
+    bool zeroed = true;
+    for (int i = 0; i < NUM_RELAYS; i++)
+      if (c.relay_bands[i] || c.relay_feed[i] || c.relay_group[i]) zeroed = false;
+    CHECK(zeroed); }
 }
 
 int main() {

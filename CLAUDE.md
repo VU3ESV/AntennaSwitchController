@@ -125,7 +125,7 @@ at power-up, and SHOULD prefer GPIO14/12/13/4/5 for the most-used bands.
   | `/`        | GET    | Config form: WiFi, TCI host/port, band→relay map, manual override |
   | `/save`    | POST   | Persist settings                                 |
   | `/status`  | GET    | JSON: current band, active relay, TCI/WiFi/TX/Tune, mode |
-  | `/config`  | GET    | JSON: stored settings (band→relay map + per-band SO2R fallback map, relay names, radio_type, radio host/port, receiver index, mode/peer/interlock, radio2_*, switch_type, region, hostname, guard, SSID — **never** passwords) for the macOS app |
+  | `/config`  | GET    | JSON: stored settings (band→relay map + per-band SO2R fallback map, relay names + per-relay antenna metadata (band coverage / feed / group), radio_type, radio host/port, receiver index, mode/peer/interlock, radio2_*, switch_type, region, hostname, guard, SSID — **never** passwords) for the macOS app |
   | `/relay`   | POST   | Manual override: `set=auto\|none\|0..7`          |
   | `/discover`| GET    | Device identity + mDNS metadata + firmware version |
   | `/reboot`  | POST   | Soft reboot                                      |
@@ -243,7 +243,13 @@ RTX.h RTX.cpp      bundled IW7DMH RTX state (band edges, VFO/TRX/tune getters)
 > band's primary antenna is held by the other radio the controller switches that
 > radio to the band's fallback instead of none (e.g. a HexBeam shared 20–6 m with
 > a wire dipole fallback), never moving a TX radio; standalone ignores it. v6→v7
-> migration preserves all settings.
+> migration preserves all settings. **M1/M3** added **per-relay antenna metadata**
+> (config v8, `relay_bands` coverage bitmask + `relay_feed`/`relay_group`): the
+> app/web "Antennas" editor declares each antenna's band coverage and feed type,
+> the band map warns on coverage mismatches, and triplexer legs sharing a group
+> are usable by both radios at once (distinct relay indices — no resolver change).
+> Metadata only (switching unchanged); v7→v8 migration. See
+> [docs/HARDWARE.md](docs/HARDWARE.md) for triplexer/BPF/stub wiring.
 
 ## 6. Confirmed decisions
 
