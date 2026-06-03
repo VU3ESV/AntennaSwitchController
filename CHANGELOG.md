@@ -10,6 +10,35 @@ work. See the [GitHub Releases] for downloads.
 
 [GitHub Releases]: https://github.com/VU3ESV/AntennaSwitchController/releases
 
+## [Unreleased]
+### Added
+- **Single shared TCI client in Mode B (dual)** — when both radios are TCI on the
+  *same* `host:port` (a SunSDR2's two receivers, RX1/RX2), the controller reads
+  both receivers from **one** WebSocket instead of opening a redundant second one
+  (the bundled library already demultiplexes per-receiver events into
+  `rtx[0]`/`rtx[1]`). Halves inbound traffic and removes the band-switch lag seen
+  with two sockets to one radio; `TCI::process()` also drains a small bounded
+  batch of queued frames per call (was one), so a busy radio's events don't back up.
+
+### Fixed
+- **Band-change reboot in Mode B (dangerous: dropped a live antenna).** Tuning one
+  receiver to a new band could reset the ESP — a CPU exception (LoadStoreError)
+  that de-energized **every** relay for ~6 s before reconnecting. Root cause: the
+  bundled TCI parser dispatches by substring (`strstr`) but parses from the start
+  (`sscanf`), so a substring/format mismatch left the receiver index `rtxId`
+  unparsed (garbage) and `rtx[rtxId]` stored through a wild pointer. All
+  receiver-array accesses now go through a bounds-checked accessor; the
+  `modulation` handler's unbounded `%s` + `modulation[strlen-1]` underflow is
+  rewritten as a bounded read, and every `sscanf("%s")` is width-limited.
+  Validated on a SunSDR2: RX1 cycled across bands repeatedly, zero exceptions,
+  RX2's relay held throughout.
+- **In-use antenna dropped on a brief TCI flap.** Relay decisions now debounce
+  link loss (hold the last antenna for up to 5 s) instead of de-energizing the
+  instant `connected()` goes false, so a momentary reconnect no longer drops a
+  live antenna. Sustained loss still fails safe (R2.10).
+- **TCI ring-buffer overflow.** `put_messages()` did an unbounded `sprintf` into a
+  90-byte slot; oversized frames are now dropped and the copy is bounded.
+
 ## [v0.1.7] — 2026-06-03
 ### Added
 - **Per-radio TCI receiver index** (`radio_rx` / `radio2_rx`): a radio that

@@ -206,7 +206,9 @@ FlexSource.h       RadioSource over FlexRadio SmartSDR (TCP 4992); P1, build-ver
 OutputStage.h      relay map; Relay8x1 (8×1 break-before-make) + Relay8x2 (8×2: relay i=antenna i, one HIGH per radio)
 Interlock.h        SO2R MasterArbiter + SlaveClient (Mode A, debounced heartbeat) + DualResolver (Mode B)
 WebPortal.h        HTTP routes + HTML config page (+ /config, /discover)
-TCI.h TCI.cpp      bundled IW7DMH TCI v1.0.1, ESP8266-ported (see R2.1)
+TCI.h TCI.cpp      bundled IW7DMH TCI v1.0.1, ESP8266-ported (see R2.1); parse
+                   hardened: bounds-checked rtxAt() for all rtx[] access + bounded
+                   sscanf reads (a garbage rtxId used to crash the ESP on band change)
 RTX.h RTX.cpp      bundled IW7DMH RTX state (band edges, VFO/TRX/tune getters)
 ```
 
