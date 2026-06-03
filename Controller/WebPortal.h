@@ -26,21 +26,26 @@ typedef void   (*RebootFn)();
 typedef int    (*ClaimFn)(int);      // SO2R: slave claim → 1 granted / 0 denied
 typedef void   (*ReleaseFn)();       // SO2R: slave release
 typedef String (*InterlockFn)();     // SO2R: interlock state JSON
+typedef void   (*TestInjectFn)(int radio, int band, int tx);  // test rig (ANTSW_TEST)
+typedef void   (*TestClearFn)();                              // test rig clear
 
 class WebPortal {
  public:
   void begin(Config& cfg, StatusFn statusFn, SaveFn saveFn,
              OverrideFn ovrFn, RebootFn rebootFn,
              ClaimFn claimFn = nullptr, ReleaseFn releaseFn = nullptr,
-             InterlockFn interlockFn = nullptr) {
-    cfg_         = &cfg;
-    statusFn_    = statusFn;
-    saveFn_      = saveFn;
-    ovrFn_       = ovrFn;
-    rebootFn_    = rebootFn;
-    claimFn_     = claimFn;
-    releaseFn_   = releaseFn;
-    interlockFn_ = interlockFn;
+             InterlockFn interlockFn = nullptr,
+             TestInjectFn testInjectFn = nullptr, TestClearFn testClearFn = nullptr) {
+    cfg_          = &cfg;
+    statusFn_     = statusFn;
+    saveFn_       = saveFn;
+    ovrFn_        = ovrFn;
+    rebootFn_     = rebootFn;
+    claimFn_      = claimFn;
+    releaseFn_    = releaseFn;
+    interlockFn_  = interlockFn;
+    testInjectFn_ = testInjectFn;
+    testClearFn_  = testClearFn;
 
     server_.on("/",         HTTP_GET,  [this]{ handleRoot(); });
     server_.on("/save",     HTTP_POST, [this]{ handleSave(); });
@@ -53,6 +58,13 @@ class WebPortal {
     server_.on("/interlock",         HTTP_GET,  [this]{ handleInterlockGet(); });
     server_.on("/interlock/claim",   HTTP_POST, [this]{ handleClaim(); });
     server_.on("/interlock/release", HTTP_POST, [this]{ handleRelease(); });
+#ifdef ANTSW_TEST
+    // Test rig (only in -DANTSW_TEST builds): inject a band/TX scenario so a test
+    // suite can exercise the resolver/interlock without tuning real radios.
+    server_.on("/test/inject", HTTP_POST, [this]{ handleTestInject(); });
+    server_.on("/test/clear",  HTTP_POST, [this]{ if (testClearFn_) testClearFn_();
+                                                  server_.send(200, "text/plain", "ok"); });
+#endif
     server_.begin();
   }
 
@@ -65,9 +77,11 @@ class WebPortal {
   SaveFn      saveFn_      = nullptr;
   OverrideFn  ovrFn_       = nullptr;
   RebootFn    rebootFn_    = nullptr;
-  ClaimFn     claimFn_     = nullptr;
-  ReleaseFn   releaseFn_   = nullptr;
-  InterlockFn interlockFn_ = nullptr;
+  ClaimFn      claimFn_      = nullptr;
+  ReleaseFn    releaseFn_    = nullptr;
+  InterlockFn  interlockFn_  = nullptr;
+  TestInjectFn testInjectFn_ = nullptr;
+  TestClearFn  testClearFn_  = nullptr;
 
   static String esc(const char* s) {
     String o;
@@ -279,6 +293,17 @@ class WebPortal {
     server_.sendHeader("Location", "/");
     server_.send(303, "text/plain", "saved");
   }
+
+#ifdef ANTSW_TEST
+  // POST /test/inject?r=0|1&band=<idx>&tx=0|1 — inject a simulated radio state.
+  void handleTestInject() {
+    int r    = server_.hasArg("r")    ? (int)server_.arg("r").toInt()    : 0;
+    int band = server_.hasArg("band") ? (int)server_.arg("band").toInt() : -1;
+    int tx   = server_.hasArg("tx")   ? (int)server_.arg("tx").toInt()   : 0;
+    if (testInjectFn_) testInjectFn_(constrain(r, 0, 1), band, tx);
+    server_.send(200, "text/plain", "ok");          // poll /status for the result
+  }
+#endif
 
   void handleRelay() {
     String s = server_.arg("set");

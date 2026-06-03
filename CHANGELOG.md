@@ -23,7 +23,15 @@ work. See the [GitHub Releases] for downloads.
   Standalone units ignore it (no contention). Config **v7** (`band_relay2[]`,
   exposed via `/config` `bands2` + `/save` `s0..s10`); v6→v7 migration preserves
   all settings. App + web band map gain a "Fallback" column (shown only for SO2R
-  modes). See [docs/MULTI-RADIO-SO2R-PLAN.md §11](docs/MULTI-RADIO-SO2R-PLAN.md).
+  modes). **Live-validated** on the two-board Mode A pair. See
+  [docs/MULTI-RADIO-SO2R-PLAN.md §11](docs/MULTI-RADIO-SO2R-PLAN.md).
+- **Test infrastructure** for the SO2R decision logic (plan §11.9): host unit
+  tests of the resolvers (`Controller/test/`, real firmware headers + desktop
+  shims, 48 assertions, no hardware) and a live integration suite (`App/Tests/`)
+  that configures real boards with the app's HTTP client and drives scenarios via
+  a new gated **`/test/inject`** firmware API (compiled only with `-DANTSW_TEST`;
+  absent from production images). Both wired into CI; the integration suite
+  self-skips without board addresses.
 - **Per-relay (antenna) names.** Name each relay — e.g. "80m Dipole", "Hexbeam" —
   in the app's Settings or the controller's web page. The names replace the
   generic "R1–R8" everywhere (dashboard active relay, controls buttons, band→relay

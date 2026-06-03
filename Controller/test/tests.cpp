@@ -1,0 +1,169 @@
+// Host unit tests for the firmware's pure decision logic — the SO2R interlock
+// resolvers (DualResolver / MasterArbiter) and the EEPROM config migration.
+// These compile the REAL firmware headers (Config.h, Interlock.h, BandPlan.h)
+// against the desktop shims in shims/, so the logic under test is exactly what
+// ships — no duplication. No hardware required.
+//
+//   make run        # build + run
+//
+// Covers every branch of the P4 per-band fallback (docs/MULTI-RADIO-SO2R-PLAN.md
+// §11): collisions, first-come vs priority, TX-safety, fallback taken / blocked,
+// and recovery. The on-board /test/inject API drives the same scenarios live;
+// the Swift integration suite asserts them end-to-end.
+#include "Config.h"      // real — via shims/ (enums, struct, migration)
+#include "Interlock.h"   // real — the resolvers under test
+#include <cstdio>
+
+// Globals the shims declare extern.
+unsigned long g_fakeMillis = 0;
+WiFiClass     WiFi;
+EEPROMClass   EEPROM;
+
+static int g_pass = 0, g_fail = 0;
+static const char* g_group = "";
+#define GROUP(n) do { g_group = n; printf("[%s]\n", n); } while (0)
+#define CHECK(cond) do { \
+  if (cond) { g_pass++; } \
+  else { g_fail++; printf("  FAIL (%s line %d): %s\n", g_group, __LINE__, #cond); } \
+} while (0)
+
+// --- DualResolver (Mode B, in-firmware) ------------------------------------
+static void test_dual() {
+  GROUP("DualResolver");
+  int a1, a2;
+
+  // No collision: each radio gets its primary.
+  { DualResolver r; r.resolve(2, -1, 3, -1, false, false, a1, a2);
+    CHECK(a1 == 2); CHECK(a2 == 3); }
+
+  // Both off-band → both none.
+  { DualResolver r; r.resolve(-1, -1, -1, -1, false, false, a1, a2);
+    CHECK(a1 == -1); CHECK(a2 == -1); }
+
+  // Collision, neither holds yet → first-come defaults to Radio 1; R2 to none.
+  { DualResolver r; r.resolve(2, -1, 2, -1, false, false, a1, a2);
+    CHECK(a1 == 2); CHECK(a2 == -1); }
+
+  // Collision, loser (R2) has a fallback → R2 takes it.
+  { DualResolver r; r.resolve(2, -1, 2, 5, false, false, a1, a2);
+    CHECK(a1 == 2); CHECK(a2 == 5); }
+
+  // Fallback blocked because it equals the winner's antenna → none.
+  { DualResolver r; r.resolve(2, -1, 2, 2, false, false, a1, a2);
+    CHECK(a1 == 2); CHECK(a2 == -1); }
+
+  // First-come: R2 already holds the antenna, so R1 (newcomer) falls back.
+  { DualResolver r;
+    r.resolve(-1, -1, 2, -1, false, false, a1, a2);   // R2 acquires 2
+    CHECK(a2 == 2);
+    r.resolve(2, 5, 2, -1, false, false, a1, a2);      // R1 now wants 2 too
+    CHECK(a1 == 5); CHECK(a2 == 2); }
+
+  // TX-safety: a transmitting radio is never moved. R1 holds 2 and is keying;
+  // R2 wants 2 → R2 is the one that falls back.
+  { DualResolver r;
+    r.resolve(2, -1, -1, -1, false, false, a1, a2);    // R1 acquires 2
+    r.resolve(2, -1, 2, 5, true, false, a1, a2);        // R1 TX, R2 contends
+    CHECK(a1 == 2); CHECK(a2 == 5); }
+
+  // TX-safety beats first-come the other way: R2 holds 2 and is keying; R1
+  // contends → R1 falls back, the transmitting R2 keeps its antenna.
+  { DualResolver r;
+    r.resolve(-1, -1, 2, -1, false, false, a1, a2);    // R2 acquires 2
+    r.resolve(2, 5, 2, -1, false, true, a1, a2);        // R2 TX, R1 contends
+    CHECK(a1 == 5); CHECK(a2 == 2); }
+
+  // Priority policy: Radio 1 wins the collision regardless of who held it.
+  { DualResolver r; r.setPolicy(ILK_PRIORITY);
+    r.resolve(-1, -1, 2, -1, false, false, a1, a2);    // R2 acquires 2
+    r.resolve(2, -1, 2, 7, false, false, a1, a2);       // R1 priority-wins 2
+    CHECK(a1 == 2); CHECK(a2 == 7); }                    // R2 → its fallback
+
+  // Priority must still not move a transmitting radio (safety > priority).
+  { DualResolver r; r.setPolicy(ILK_PRIORITY);
+    r.resolve(-1, -1, 2, -1, false, false, a1, a2);    // R2 acquires 2
+    r.resolve(2, 5, 2, -1, false, true, a1, a2);        // R2 TX → keeps 2
+    CHECK(a1 == 5); CHECK(a2 == 2); }
+}
+
+// --- MasterArbiter (Mode A, LAN arbiter) -----------------------------------
+static void test_master() {
+  GROUP("MasterArbiter");
+
+  // Free: master drives its desired antenna.
+  { MasterArbiter m; CHECK(m.resolveMaster(2, -1) == 2); CHECK(m.masterAnt() == 2); }
+
+  // Slave claims a different antenna → master keeps its own.
+  { MasterArbiter m; m.resolveMaster(2, -1);
+    CHECK(m.claim(3) == 1); CHECK(m.resolveMaster(2, -1) == 2); }
+
+  // Slave is denied the antenna the master currently holds.
+  { MasterArbiter m; m.resolveMaster(2, -1); CHECK(m.claim(2) == 0); }
+
+  // First-come: slave holds it, master has no fallback → master goes none.
+  { MasterArbiter m; m.resolveMaster(3, -1);
+    CHECK(m.claim(2) == 1);                 // slave grabs 2 (master on 3)
+    CHECK(m.resolveMaster(2, -1) == -1); }   // master now wants 2 → blocked
+
+  // First-come with a fallback: blocked master takes its secondary.
+  { MasterArbiter m; m.resolveMaster(3, -1);
+    CHECK(m.claim(2) == 1);
+    CHECK(m.resolveMaster(2, 5) == 5); CHECK(m.masterAnt() == 5); }
+
+  // Priority: master preempts the slave's hold.
+  { MasterArbiter m; m.setPolicy(ILK_PRIORITY); m.resolveMaster(3, -1);
+    m.claim(2);
+    CHECK(m.resolveMaster(2, -1) == 2);
+    CHECK(m.slaveAnt() == -1); }             // slave denied on its next beat
+
+  // Heartbeat expiry: a slave that stops beating loses its hold after the window.
+  { MasterArbiter m; g_fakeMillis = 1000; m.claim(2);
+    CHECK(m.slaveAnt() == 2); CHECK(m.peerUp());
+    g_fakeMillis = 1000 + HB_WINDOW_MS + 1; m.tick();
+    CHECK(m.slaveAnt() == -1); CHECK(!m.peerUp());
+    g_fakeMillis = 0; }
+}
+
+// --- Config v6→v7 migration + round-trip -----------------------------------
+static void test_config() {
+  GROUP("Config v6→v7");
+
+  // Defaults: new fallback map is all-none, magic is v7.
+  { Config c; configDefaults(c);
+    CHECK(c.magic == CFG_MAGIC);
+    bool allNone = true;
+    for (int i = 0; i < NUM_BANDS; i++) if (c.band_relay2[i] != -1) allNone = false;
+    CHECK(allNone); }
+
+  // Round-trip a fallback through save/load.
+  { Config c; configDefaults(c); c.band_relay2[5] = 5; c.band_relay[5] = 2; configSave(c);
+    Config d; bool ok = configLoad(d);
+    CHECK(ok); CHECK(d.band_relay2[5] == 5); CHECK(d.band_relay[5] == 2); }
+
+  // Migrate a v6 image: band map + relay names preserved, fallback defaults none.
+  { ConfigV6 v6; memset(&v6, 0, sizeof(v6));
+    v6.magic = CFG_MAGIC_V6;
+    v6.mode = MODE_MASTER;
+    for (int i = 0; i < NUM_BANDS; i++) v6.band_relay[i] = (int8_t)(i % 8);
+    strncpy(v6.relay_name[0], "HexBeam", RELAY_NAME_LEN - 1);
+    v6.crc = crc32(reinterpret_cast<const uint8_t*>(&v6), offsetof(ConfigV6, crc));
+    EEPROM.put(0, v6);                       // place the v6 image in EEPROM
+
+    Config c; bool ok = configLoad(c);
+    CHECK(ok);
+    CHECK(c.magic == CFG_MAGIC);             // upgraded to v7
+    CHECK(c.mode == MODE_MASTER);
+    CHECK(c.band_relay[3] == 3);             // band map preserved
+    CHECK(std::string(c.relay_name[0]) == "HexBeam");
+    bool allNone = true;
+    for (int i = 0; i < NUM_BANDS; i++) if (c.band_relay2[i] != -1) allNone = false;
+    CHECK(allNone); }                        // new fallback map defaulted to none
+}
+
+int main() {
+  test_dual();
+  test_master();
+  test_config();
+  printf("\n%d passed, %d failed\n", g_pass, g_fail);
+  return g_fail ? 1 : 0;
+}

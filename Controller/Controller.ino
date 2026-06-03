@@ -117,19 +117,53 @@ void applyInterlock() {
   g_resolver.setPolicy(g_cfg.interlock_policy);
 }
 
-// Map a radio's band to its desired antenna, honoring the link failsafe.
-int desiredFor(RadioSource* r, bool link) {
-  int b = r->band();
-  if (!link || b < 0) return -1;
-  return g_cfg.band_relay[b];
+// ---- test injection (compiled only with -DANTSW_TEST) ----------------------
+// Lets a test suite put a board into any band/TX scenario without tuning real
+// radios, via POST /test/inject?r=0|1&band=<idx>&tx=0|1 (and /test/clear). The
+// rig overrides the radio's band/TX and forces "linked"; production builds omit
+// the routes entirely (so this never ships in a normal image).
+#ifdef ANTSW_TEST
+struct TestRig { bool active = false; int band = -1; bool tx = false; };
+TestRig g_testRig[2];
+void onTestInject(int r, int band, int tx) {
+  if (r < 0 || r > 1) return;
+  g_testRig[r] = { true, band, tx != 0 };
+}
+void onTestClear() { g_testRig[0] = TestRig{}; g_testRig[1] = TestRig{}; }
+#endif
+
+// A radio's band / TX / link, with optional test-rig override (idx 0 = radio 1).
+int rigBand(int idx, RadioSource* r) {
+#ifdef ANTSW_TEST
+  if (g_testRig[idx].active) return g_testRig[idx].band;
+#endif
+  return r->band();
+}
+bool rigTx(int idx, RadioSource* r) {
+#ifdef ANTSW_TEST
+  if (g_testRig[idx].active) return g_testRig[idx].tx;
+#endif
+  return r->isTx() || r->isTune();
+}
+bool rigLink(int idx, bool raw) {
+#ifdef ANTSW_TEST
+  if (g_testRig[idx].active) return true;     // an injected rig is always "linked"
+#endif
+  (void)idx;
+  return raw;
+}
+
+// Map a band index to its desired antenna, honoring the link failsafe.
+int desiredFor(int band, bool link) {
+  if (!link || band < 0) return -1;
+  return g_cfg.band_relay[band];
 }
 
 // The band's SO2R fallback antenna (used when the primary is taken by the other
 // radio); -1 = none. Only consulted by the interlock (standalone never falls back).
-int secondaryFor(RadioSource* r, bool link) {
-  int b = r->band();
-  if (!link || b < 0) return -1;
-  return g_cfg.band_relay2[b];
+int secondaryFor(int band, bool link) {
+  if (!link || band < 0) return -1;
+  return g_cfg.band_relay2[band];
 }
 
 // Resolve the local desired antenna through the active mode's interlock
@@ -311,7 +345,11 @@ void setup() {
   // 3. SO2R interlock + web portal.
   applyInterlock();
   g_web.begin(g_cfg, statusJson, onSave, onOverride, onReboot,
-              onClaim, onRelease, interlockJson);
+              onClaim, onRelease, interlockJson
+#ifdef ANTSW_TEST
+              , onTestInject, onTestClear
+#endif
+              );
   Serial.println(F("ready"));
 }
 
@@ -337,17 +375,21 @@ void loop() {
   bool link  = g_link1.stable(rawLink);
   bool link2 = g_link2.stable(rawLink2);
 
+  // Effective band / TX / link per radio (test rig overrides when injected).
+  int  band1 = rigBand(0, g_radio),  band2 = rigBand(1, g_radio2);
+  bool link1 = rigLink(0, link),     linkB = rigLink(1, link2);
+
   if (g_cfg.mode == MODE_DUAL) {
     // Mode B: one board, both radios → external 8×2 switch. Resolve the two
     // desired antennas (first-come, per-radio TX-safety) then drive the A/B
     // lines. Manual override forces Radio 1; Radio 2 stays automatic.
-    bool tx1 = g_radio->isTx()  || g_radio->isTune();
-    bool tx2 = g_radio2->isTx() || g_radio2->isTune();
+    bool tx1 = rigTx(0, g_radio);
+    bool tx2 = rigTx(1, g_radio2);
     bool ovr = (g_override != -2);
-    int d1 = ovr ? (g_override == -1 ? -1 : g_override) : desiredFor(g_radio, link);
-    int s1 = ovr ? -1 : secondaryFor(g_radio, link);   // override is explicit, no fallback
-    int d2 = desiredFor(g_radio2, link2);
-    int s2 = secondaryFor(g_radio2, link2);
+    int d1 = ovr ? (g_override == -1 ? -1 : g_override) : desiredFor(band1, link1);
+    int s1 = ovr ? -1 : secondaryFor(band1, link1);   // override is explicit, no fallback
+    int d2 = desiredFor(band2, linkB);
+    int s2 = secondaryFor(band2, linkB);
     int a1, a2;
     g_resolver.resolve(d1, s1, d2, s2, tx1, tx2, a1, a2);  // TX-safety + fallback inside
     g_dual.setInhibit(false);
@@ -356,11 +398,11 @@ void loop() {
     digitalWrite(STATUS_LED, (rawLink && rawLink2) ? LOW : HIGH);
   } else {
     // R2.9: no hot-switching while the radio is transmitting/tuning.
-    g_out.setInhibit(g_radio->isTx() || g_radio->isTune());
+    g_out.setInhibit(rigTx(0, g_radio));
 
     int localDesired, localSecondary;
     if (g_override != -2) { localDesired = (g_override == -1) ? -1 : g_override; localSecondary = -1; }  // R2.11
-    else { localDesired = desiredFor(g_radio, link); localSecondary = secondaryFor(g_radio, link); }     // R2.7/R2.10
+    else { localDesired = desiredFor(band1, link1); localSecondary = secondaryFor(band1, link1); }       // R2.7/R2.10
 
     // SO2R Mode A: arbitrate against the peer so the two radios never share an
     // antenna index (standalone passes through unchanged). On a first-come

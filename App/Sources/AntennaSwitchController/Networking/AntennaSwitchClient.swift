@@ -130,3 +130,31 @@ struct AntennaSwitchClient {
         }
     }
 }
+
+// MARK: - Test rig API
+//
+// Drives the firmware's `/test/*` endpoints, which only exist in builds compiled
+// with `-DANTSW_TEST`. Used by the integration test suite to put a board into any
+// band/TX scenario without tuning real radios. No-ops against a production image
+// (the routes return 404, surfaced as `.badResponse(404)`).
+extension AntennaSwitchClient {
+    /// Inject a simulated radio state. `radio` is 0 (Radio 1) or 1 (Radio 2),
+    /// `band` is a band index (or -1 = none), `tx` keys the transmitting state.
+    func injectTestRig(radio: Int, band: Int, tx: Bool) async throws {
+        var comps = URLComponents(url: try baseURL().appendingPathComponent("test/inject"),
+                                  resolvingAgainstBaseURL: false)
+        comps?.queryItems = [
+            URLQueryItem(name: "r",    value: String(radio)),
+            URLQueryItem(name: "band", value: String(band)),
+            URLQueryItem(name: "tx",   value: tx ? "1" : "0"),
+        ]
+        guard let url = comps?.url else { throw AntennaSwitchClientError.invalidHost }
+        try await postForm(url: url, body: "")
+    }
+
+    /// Clear all injected state — return both radios to live band tracking.
+    func clearTestRig() async throws {
+        let url = try baseURL().appendingPathComponent("test/clear")
+        try await postForm(url: url, body: "")
+    }
+}
