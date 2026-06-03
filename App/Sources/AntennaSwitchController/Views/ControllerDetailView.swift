@@ -19,7 +19,8 @@ struct ControllerDetailView: View {
         TabView {
             DashboardView(vm: vm).tabItem { Label("Dashboard", systemImage: "gauge.with.dots.needle.bottom.50percent") }
             ControlsView(vm: vm).tabItem { Label("Controls", systemImage: "dial.medium") }
-            SettingsView(vm: vm).tabItem { Label("Settings", systemImage: "gearshape") }
+            SettingsView(vm: vm, discoveredMasters: store.discovered)
+                .tabItem { Label("Settings", systemImage: "gearshape") }
         }
         .navigationTitle(controller.name)
         .navigationSubtitle(controller.address)

@@ -12,6 +12,20 @@ work. See the [GitHub Releases] for downloads.
 
 ## [Unreleased]
 ### Added
+- **Pick the SO2R master from mDNS discovery.** In Slave mode, Settings offers a
+  "Pick master from network" menu of the controllers found via Bonjour
+  (`_antsw._tcp`), excluding this unit; selecting one fills in the master address
+  (preferring the stable `.local` hostname over the DHCP IP). Manual entry still
+  works.
+
+## [v0.1.23] — 2026-06-03
+### Changed
+- **Tests:** added a live **Mode B (Dual)** integration test (collision → fallback,
+  clear-band, TX-safety) driven via the app client + `/test/inject`; the Mode A
+  and Mode B integration tests now skip independently on their own env vars.
+
+## [v0.1.22] — 2026-06-03
+### Added
 - **Antenna metadata + coverage validation (P4 / M1, M3).** Each relay (antenna)
   can now declare the **bands it covers**, a **feed type** (single feedline vs a
   **triplexed** leg), and a **group** id. The app's new *Antennas* section (and
@@ -24,6 +38,17 @@ work. See the [GitHub Releases] for downloads.
   it requires. Metadata only — switching behaviour is unchanged. Config **v8**
   (`relay_bands` / `relay_feed` / `relay_group` via `/config` + `/save`); v7→v8
   migration preserves all settings.
+
+## [v0.1.21] — 2026-06-03
+### Added
+- **SO2R contention indicator** in the app dashboard. When a radio loses its
+  band's primary antenna to the other radio, its card shows an **"On fallback"**
+  (amber) or **"Primary busy"** (red, no antenna free) badge — so the operator
+  can see *why* a radio is on a different antenna or none. Derived entirely from
+  `/status` + `/config` (no firmware change); standalone units never show it.
+
+## [v0.1.20] — 2026-06-03
+### Added
 - **Per-band fallback antenna for SO2R (P4 / multiband antennas).** Each band now
   has an optional **secondary** antenna in addition to its primary. In SO2R
   (Master/Slave or Dual) when the primary antenna is already in use by the other
@@ -37,71 +62,113 @@ work. See the [GitHub Releases] for downloads.
   all settings. App + web band map gain a "Fallback" column (shown only for SO2R
   modes). **Live-validated** on the two-board Mode A pair. See
   [docs/MULTI-RADIO-SO2R-PLAN.md §11](docs/MULTI-RADIO-SO2R-PLAN.md).
-- **SO2R contention indicator** in the app dashboard. When a radio loses its
-  band's primary antenna to the other radio, its card shows an **"On fallback"**
-  (amber) or **"Primary busy"** (red, no antenna free) badge — so the operator
-  can see *why* a radio is on a different antenna or none. Derived entirely from
-  `/status` + `/config` (no firmware change); standalone units never show it.
 - **Test infrastructure** for the SO2R decision logic (plan §11.9): host unit
   tests of the resolvers (`Controller/test/`, real firmware headers + desktop
-  shims, 48 assertions, no hardware) and a live integration suite (`App/Tests/`)
-  that configures real boards with the app's HTTP client and drives scenarios via
-  a new gated **`/test/inject`** firmware API (compiled only with `-DANTSW_TEST`;
-  absent from production images). Both wired into CI; the integration suite
-  self-skips without board addresses.
-- **Per-relay (antenna) names.** Name each relay — e.g. "80m Dipole", "Hexbeam" —
-  in the app's Settings or the controller's web page. The names replace the
-  generic "R1–R8" everywhere (dashboard active relay, controls buttons, band→relay
-  map, manual-override buttons, and the dual-mode interlock badges, now "Radio 1 →
-  80m Dipole"), removing the clash with the radio's own RX1/RX2 receiver labels.
-  Stored on the controller in EEPROM (config **v6**, exposed via `/config` +
-  `/save`); a blank name falls back to "R<n>". v5→v6 migration preserves all
-  existing settings.
-- **Single shared TCI client in Mode B (dual)** — when both radios are TCI on the
-  *same* `host:port` (a SunSDR2's two receivers, RX1/RX2), the controller reads
-  both receivers from **one** WebSocket instead of opening a redundant second one
-  (the bundled library already demultiplexes per-receiver events into
-  `rtx[0]`/`rtx[1]`). Halves inbound traffic and removes the band-switch lag seen
-  with two sockets to one radio; `TCI::process()` also drains a small bounded
-  batch of queued frames per call (was one), so a busy radio's events don't back up.
+  shims, no hardware) and a live integration suite (`App/Tests/`) that configures
+  real boards with the app's HTTP client and drives scenarios via a new gated
+  **`/test/inject`** firmware API (compiled only with `-DANTSW_TEST`; absent from
+  production images). Both wired into CI; the integration suite self-skips without
+  board addresses.
 
+## [v0.1.19] — 2026-06-03
+### Changed
+- **Docs:** added the multiband-antenna (HexBeam) support plan —
+  [docs/MULTI-RADIO-SO2R-PLAN.md §11](docs/MULTI-RADIO-SO2R-PLAN.md) + a P4
+  roadmap entry.
+
+## [v0.1.18] — 2026-06-03
+### Fixed
+- **Standalone app quits when its window is closed.** Closing the window left a
+  windowless process in the Dock that wouldn't reopen on click (the app removes
+  the "New Window" command, which also disables SwiftUI's dock-reopen). It now
+  terminates on last-window-close. The suite plugin's lifecycle is host-owned and
+  unaffected.
+
+## [v0.1.17] — 2026-06-03
 ### Changed
 - **JSON responses pre-reserve their buffers.** `/status`, `/config`, the
   interlock payload, and the HTML-escape helper now `String::reserve()` up front
   instead of growing append-by-append, so building a response no longer churns
-  the heap with repeated reallocations (free heap on the boards sits at ~27 KB;
-  this keeps fragmentation pressure off it). Behaviour is unchanged.
-
+  the heap with repeated reallocations. Behaviour is unchanged.
 ### Removed
 - **Temporary `/status` crash diagnostics** (`reset` / `resetinfo` / `heap`).
-  These were added to chase the Mode-B band-change reboot; that bug is fixed and
-  field-confirmed (zero exception resets across both boards), so the fields are
-  gone. Frees ~0.5 KB of flash and trims the status payload. The app and web UI
-  never consumed them.
+  Added to chase the Mode-B band-change reboot; that bug is fixed and
+  field-confirmed, so the fields are gone (~0.5 KB flash). The app/web never read
+  them.
 
+## [v0.1.16] — 2026-06-03
+### Changed
+- **Docs:** refreshed the README and regenerated the app screenshots
+  (dual-radio dashboard, named antennas, red/tap-to-deactivate Controls).
+
+## [v0.1.15] — 2026-06-03
 ### Fixed
-- **Firmware version reported correctly.** The controller's `/discover` (and mDNS
-  TXT) reported a hardcoded `"1.0"` regardless of the build — the release pipeline
-  only stamped the version into the macOS app, not the firmware. The release now
-  injects the tag into `FW_VERSION` at compile time, so the app's dashboard shows
-  the real firmware version (e.g. `0.1.15`). Local builds still fall back to `1.0`.
+- **Firmware version reported correctly.** `/discover` (and the mDNS TXT) reported
+  a hardcoded `"1.0"` regardless of the build — the pipeline only stamped the app.
+  The release now injects the tag into `FW_VERSION` at compile time, so the
+  dashboard shows the real firmware version. Local builds still fall back to `1.0`.
+
+## [v0.1.14] — 2026-06-03
+### Changed
+- **Settings: the Radio 2 RX picker appears only when it can apply** — i.e. when
+  Radio 2 shares Radio 1's TCI host/port (the one 2-receiver-radio case). Two
+  *separate* radios both use RX1; the app forces `radio2_rx = 0` on save for that
+  case, fixing a board that wasn't switching on a separate Radio 2's band.
+
+## [v0.1.13] — 2026-06-03
+### Changed
+- **Controls: clearer manual-off state in Mode B** — a per-radio mode summary and
+  an explicit "Radio 1 Off" button, with natural wording ("Radio 1 off (manual)").
+
+## [v0.1.12] — 2026-06-03
+### Changed
+- **Controls: active relays are red and tap-to-deactivate.** Tapping an energized
+  relay returns to Auto; the active relay is shown in red.
+### Fixed
+- Release badge tracked a stale dispatch run; now follows the merge event.
+
+## [v0.1.11] — 2026-06-03
+### Added
+- **Per-relay (antenna) names.** Name each relay — e.g. "80m Dipole", "HexBeam" —
+  in the app's Settings or the controller's web page. The names replace the
+  generic "R1–R8" everywhere (dashboard, controls, band→relay map, manual-override
+  buttons, dual-mode interlock badges), removing the clash with the radio's own
+  RX1/RX2 receiver labels. Stored in EEPROM (config **v6**, via `/config` +
+  `/save`); a blank name falls back to "R<n>". v5→v6 migration preserves settings.
+- **Symmetric dual dashboard + Controls (Mode B).** The dashboard shows both
+  radios' band / frequency / relay cards; Controls shows both energized relays.
+  `/status` gains explicit `radio1_relay` / `radio2_relay` (preferred over the
+  legacy `active_relay`, kept for back-compat).
+
+## [v0.1.10] — 2026-06-03
+### Fixed
 - **Band-change reboot in Mode B (dangerous: dropped a live antenna).** Tuning one
   receiver to a new band could reset the ESP — a CPU exception (LoadStoreError)
-  that de-energized **every** relay for ~6 s before reconnecting. Root cause: the
-  bundled TCI parser dispatches by substring (`strstr`) but parses from the start
-  (`sscanf`), so a substring/format mismatch left the receiver index `rtxId`
-  unparsed (garbage) and `rtx[rtxId]` stored through a wild pointer. All
-  receiver-array accesses now go through a bounds-checked accessor; the
-  `modulation` handler's unbounded `%s` + `modulation[strlen-1]` underflow is
-  rewritten as a bounded read, and every `sscanf("%s")` is width-limited.
-  Validated on a SunSDR2: RX1 cycled across bands repeatedly, zero exceptions,
-  RX2's relay held throughout.
+  that de-energized **every** relay for ~6 s. Root cause: the bundled TCI parser
+  dispatches by substring (`strstr`) but parses from the start (`sscanf`), so a
+  mismatch left the receiver index `rtxId` unparsed (garbage) and `rtx[rtxId]`
+  stored through a wild pointer. All receiver-array accesses now go through a
+  bounds-checked accessor; the `modulation` handler's unbounded `%s` underflow is
+  a bounded read, and every `sscanf("%s")` is width-limited. Validated on a
+  SunSDR2: RX1 cycled across bands repeatedly, zero exceptions, RX2 held.
 - **In-use antenna dropped on a brief TCI flap.** Relay decisions now debounce
   link loss (hold the last antenna for up to 5 s) instead of de-energizing the
-  instant `connected()` goes false, so a momentary reconnect no longer drops a
-  live antenna. Sustained loss still fails safe (R2.10).
+  instant `connected()` goes false. Sustained loss still fails safe (R2.10).
 - **TCI ring-buffer overflow.** `put_messages()` did an unbounded `sprintf` into a
   90-byte slot; oversized frames are now dropped and the copy is bounded.
+
+## [v0.1.9] — 2026-06-03
+### Changed
+- **Docs:** updated the README and CHANGELOG for the multi-radio / SO2R features.
+
+## [v0.1.8] — 2026-06-03
+### Added
+- **Single shared TCI client in Mode B (dual)** — when both radios are TCI on the
+  *same* `host:port` (a SunSDR2's two receivers, RX1/RX2), the controller reads
+  both receivers from **one** WebSocket instead of a redundant second one (the
+  bundled library already demultiplexes per-receiver events into `rtx[0]`/`rtx[1]`).
+  Halves inbound traffic and removes the band-switch lag seen with two sockets;
+  `TCI::process()` also drains a small bounded batch of queued frames per call.
 
 ## [v0.1.7] — 2026-06-03
 ### Added
