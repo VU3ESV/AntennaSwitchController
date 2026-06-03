@@ -144,17 +144,29 @@ class WebPortal {
     }
     h += F("</table></fieldset>");
 
-    h += F("<fieldset><legend>Band &rarr; Relay map</legend><table>");
+    h += F("<fieldset><legend>Band &rarr; Relay map</legend>"
+           "<table><tr><td></td><td class=muted>Primary</td><td class=muted>Fallback (SO2R)</td></tr>");
     for (int b = 0; b < NUM_BANDS; b++) {
-      h += "<tr><td><b>" + String(bandName(b)) + "</b></td><td><select name=b" + String(b) + ">";
+      h += "<tr><td><b>" + String(bandName(b)) + "</b></td>";
+      // Primary antenna.
+      h += "<td><select name=b" + String(b) + ">";
       h += "<option value=-1" + String(c.band_relay[b] == -1 ? " selected" : "") + ">None / bypass</option>";
       for (int r = 0; r < NUM_RELAYS; r++)
         h += "<option value=" + String(r) + (c.band_relay[b] == r ? " selected" : "") +
              ">" + relayLabel(c, r) + " (GPIO" + String(kRelayPin[r]) + ")</option>";
+      h += F("</select></td>");
+      // Secondary / fallback antenna (used when the primary is taken by the other radio).
+      h += "<td><select name=s" + String(b) + ">";
+      h += "<option value=-1" + String(c.band_relay2[b] == -1 ? " selected" : "") + ">None</option>";
+      for (int r = 0; r < NUM_RELAYS; r++)
+        h += "<option value=" + String(r) + (c.band_relay2[b] == r ? " selected" : "") +
+             ">" + relayLabel(c, r) + "</option>";
       h += F("</select></td></tr>");
     }
     h += F("</table><p class=muted>Multiple bands may share one relay. "
-           "Relays on GPIO0/15/16 may twitch at power-up.</p></fieldset>");
+           "<b>Fallback</b> is used in SO2R (Master/Slave or Dual) when the primary "
+           "antenna is already in use by the other radio &mdash; e.g. a HexBeam on 20&ndash;6&nbsp;m "
+           "with a wire dipole as fallback. Relays on GPIO0/15/16 may twitch at power-up.</p></fieldset>");
 
     // --- SO2R Mode A (master/slave) ---
     h += F("<fieldset><legend>SO2R role (Mode A)</legend>");
@@ -254,6 +266,9 @@ class WebPortal {
       String key = "b" + String(b);
       if (server_.hasArg(key))
         c.band_relay[b] = (int8_t)constrain(server_.arg(key).toInt(), -1, NUM_RELAYS - 1);
+      String skey = "s" + String(b);
+      if (server_.hasArg(skey))
+        c.band_relay2[b] = (int8_t)constrain(server_.arg(skey).toInt(), -1, NUM_RELAYS - 1);
     }
     for (int r = 0; r < NUM_RELAYS; r++) {
       String key = "rn" + String(r);
@@ -324,6 +339,11 @@ class WebPortal {
     for (int b = 0; b < NUM_BANDS; b++) {
       if (b) j += ",";
       j += String(c.band_relay[b]);
+    }
+    j += "],\"bands2\":[";                          // per-band SO2R fallback relay
+    for (int b = 0; b < NUM_BANDS; b++) {
+      if (b) j += ",";
+      j += String(c.band_relay2[b]);
     }
     j += "]}";
     server_.send(200, "application/json", j);

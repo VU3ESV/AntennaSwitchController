@@ -16,7 +16,8 @@
 #define CFG_MAGIC_V3 0x414E5433UL  // "ANT3" — v3: adds SO2R mode/peer/interlock
 #define CFG_MAGIC_V4 0x414E5434UL  // "ANT4" — v4: adds radio 2 + switch_type (Mode B)
 #define CFG_MAGIC_V5 0x414E5435UL  // "ANT5" — v5: adds per-radio TCI receiver index
-#define CFG_MAGIC    0x414E5436UL  // "ANT6" — v6: adds per-relay names
+#define CFG_MAGIC_V6 0x414E5436UL  // "ANT6" — v6: adds per-relay names
+#define CFG_MAGIC    0x414E5437UL  // "ANT7" — v7: adds per-band secondary (fallback) relay
 #define EEPROM_SIZE  1024          // grew past 512 with relay names; ESP8266
                                    // reserves a 4 KB flash sector regardless
 
@@ -77,7 +78,37 @@ struct Config {
   uint8_t  radio_rx;             // radio 1 TCI receiver index (0=RX1, 1=RX2)
   uint8_t  radio2_rx;            // radio 2 TCI receiver index (0=RX1, 1=RX2)
   char     relay_name[NUM_RELAYS][RELAY_NAME_LEN];  // per-relay name ("" = default Rn)
+  int8_t   band_relay2[NUM_BANDS];// SO2R fallback: relay used when band_relay[b]
+                                 // is taken by the other radio (-1 = none)
   uint32_t crc;                  // CRC32 over all preceding bytes
+};
+
+// Frozen v6 layout — migrate v6 saved configs (relay names, no secondary map).
+// DO NOT edit: must match exactly what shipped at the v6 bump.
+struct ConfigV6 {
+  uint32_t magic;
+  char     wifi_ssid[33];
+  char     wifi_pass[65];
+  char     tci_host[64];
+  uint16_t tci_port;
+  uint8_t  iaru_region;
+  uint8_t  radio_type;
+  char     hostname[33];
+  char     ota_pass[33];
+  uint16_t guard_ms;
+  int8_t   band_relay[NUM_BANDS];
+  uint8_t  mode;
+  char     peer_host[64];
+  uint8_t  interlock_policy;
+  uint8_t  on_peer_loss;
+  uint8_t  radio2_type;
+  char     radio2_host[64];
+  uint16_t radio2_port;
+  uint8_t  switch_type;
+  uint8_t  radio_rx;
+  uint8_t  radio2_rx;
+  char     relay_name[NUM_RELAYS][RELAY_NAME_LEN];
+  uint32_t crc;
 };
 
 // Frozen v5 layout — migrate v5 saved configs (per-radio rx, no relay names).
@@ -227,13 +258,15 @@ inline void configDefaults(Config& c) {
   c.radio_rx         = 0;
   c.radio2_rx        = 0;
   defaultHostname(c.hostname, sizeof(c.hostname));
-  for (int i = 0; i < NUM_BANDS; i++) c.band_relay[i] = -1;  // none
+  for (int i = 0; i < NUM_BANDS; i++) { c.band_relay[i] = -1; c.band_relay2[i] = -1; }  // none
   c.crc = configCrc(c);
 }
 
 inline void clampConfig(Config& c) {
-  for (int i = 0; i < NUM_BANDS; i++)
-    if (c.band_relay[i] < -1 || c.band_relay[i] > 7) c.band_relay[i] = -1;
+  for (int i = 0; i < NUM_BANDS; i++) {
+    if (c.band_relay[i]  < -1 || c.band_relay[i]  > 7) c.band_relay[i]  = -1;
+    if (c.band_relay2[i] < -1 || c.band_relay2[i] > 7) c.band_relay2[i] = -1;
+  }
   if (c.radio_type > RADIO_FLEX)       c.radio_type       = RADIO_TCI;
   if (c.mode > MODE_DUAL)              c.mode             = MODE_STANDALONE;
   if (c.interlock_policy > ILK_PRIORITY) c.interlock_policy = ILK_FIRST_COME;
@@ -386,7 +419,42 @@ inline bool configMigrateV5(Config& c) {
   return true;
 }
 
-// Returns true if a valid config was loaded (incl. a migrated v1..v5); false
+// Migrate a v6 image (relay names, no secondary map) into v7 — keeps everything;
+// the new per-band secondary (fallback) relays default to -1 (none).
+inline bool configMigrateV6(Config& c) {
+  ConfigV6 v6;
+  EEPROM.begin(EEPROM_SIZE);
+  EEPROM.get(0, v6);
+  EEPROM.end();
+  if (v6.magic != CFG_MAGIC_V6) return false;
+  if (crc32(reinterpret_cast<const uint8_t*>(&v6), offsetof(ConfigV6, crc)) != v6.crc) return false;
+
+  configDefaults(c);                                // zeroes band_relay2 (none)
+  memcpy(c.wifi_ssid, v6.wifi_ssid, sizeof(c.wifi_ssid));
+  memcpy(c.wifi_pass, v6.wifi_pass, sizeof(c.wifi_pass));
+  memcpy(c.tci_host,  v6.tci_host,  sizeof(c.tci_host));
+  c.tci_port    = v6.tci_port;
+  c.iaru_region = v6.iaru_region;
+  c.radio_type  = v6.radio_type;
+  memcpy(c.hostname, v6.hostname, sizeof(c.hostname));
+  memcpy(c.ota_pass, v6.ota_pass, sizeof(c.ota_pass));
+  c.guard_ms = v6.guard_ms;
+  memcpy(c.band_relay, v6.band_relay, sizeof(c.band_relay));
+  c.mode             = v6.mode;
+  memcpy(c.peer_host, v6.peer_host, sizeof(c.peer_host));
+  c.interlock_policy = v6.interlock_policy;
+  c.on_peer_loss     = v6.on_peer_loss;
+  c.radio2_type      = v6.radio2_type;
+  memcpy(c.radio2_host, v6.radio2_host, sizeof(c.radio2_host));
+  c.radio2_port      = v6.radio2_port;
+  c.switch_type      = v6.switch_type;
+  c.radio_rx         = v6.radio_rx;
+  c.radio2_rx        = v6.radio2_rx;
+  memcpy(c.relay_name, v6.relay_name, sizeof(c.relay_name));
+  return true;
+}
+
+// Returns true if a valid config was loaded (incl. a migrated v1..v6); false
 // if defaults were applied (blank/corrupt EEPROM → safe defaults, caller should
 // enter setup/AP mode).
 inline bool configLoad(Config& c) {
@@ -397,10 +465,10 @@ inline bool configLoad(Config& c) {
     clampConfig(c);
     return true;
   }
-  if (configMigrateV5(c) || configMigrateV4(c) || configMigrateV3(c) ||
-      configMigrateV2(c) || configMigrateV1(c)) {
+  if (configMigrateV6(c) || configMigrateV5(c) || configMigrateV4(c) ||
+      configMigrateV3(c) || configMigrateV2(c) || configMigrateV1(c)) {
     clampConfig(c);
-    configSave(c);                                 // persist as v6 (migrate once)
+    configSave(c);                                 // persist as v7 (migrate once)
     return true;
   }
   configDefaults(c);

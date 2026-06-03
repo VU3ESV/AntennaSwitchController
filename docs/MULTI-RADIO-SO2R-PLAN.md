@@ -472,12 +472,14 @@ metadata, or be *derived* from the antenna list:
 ### 11.7 Phased approach (P4, refines §9)
 - **M0 — Document the today-pattern** (no code): map all of a HexBeam's bands to
   one named relay; covers every single-radio user immediately. *(README/CLAUDE.)*
+- ◑ **M2 — Per-band secondary fallback in the resolver** *(done — config **v7**
+  `band_relay2[]`; fallback wired into the Mode A `MasterArbiter` + `SlaveClient`
+  and the Mode B `DualResolver`, never moving a TX radio; app + web "Fallback"
+  column. Contention status/badges still TODO.)* **This is the SO2R payoff.**
+  *Built before M1 — it delivers the functional win; M1 is the cosmetic model.*
 - **M1 — Antenna-centric Settings UI + validation** (app + web) layered over the
   existing `band_relay[]`, with `antennas[]` metadata, coverage validation, and
   the antenna's band set shown in the map grid. Config version bump + migration.
-- **M2 — Per-band secondary fallback in the resolver** (Mode A claim path + Mode B
-  `DualResolver`) + contention status/badges. *This is the SO2R payoff and folds
-  in the §9 P3 fallback item.*
 - **M3 — Triplexer "antenna group" modelling**: `feed`/`group` fields, allow
   concurrent different-leg use, and a `docs/HARDWARE.md` note on triplexer + BPF
   + stub isolation requirements.

@@ -77,6 +77,7 @@ struct DeviceConfig: Codable, Equatable {
     var region: Int
     var guardMs: Int
     var bands: [Int]              // 11 entries, -1 = none/bypass else relay 0..7
+    var bands2: [Int]             // SO2R per-band fallback relay; -1 = none
     var mode: CtrlMode            // SO2R role (Mode A/B)
     var peerHost: String          // slave: master's address
     var interlockPolicy: InterlockPolicy
@@ -100,7 +101,7 @@ struct DeviceConfig: Codable, Equatable {
     var otaPassword: String = ""
 
     enum CodingKeys: String, CodingKey {
-        case hostname, ssid, region, bands, mode
+        case hostname, ssid, region, bands, bands2, mode
         case radioType = "radio_type"
         case tciHost = "tci_host"
         case tciPort = "tci_port"
@@ -125,6 +126,14 @@ struct DeviceConfig: Codable, Equatable {
         return names
     }
 
+    /// Normalize an int array (e.g. the fallback map) to `count` entries, -1 padded.
+    private static func normalizedInts(_ raw: [Int]?, count: Int) -> [Int] {
+        var v = raw ?? []
+        if v.count < count { v += Array(repeating: -1, count: count - v.count) }
+        else if v.count > count { v = Array(v.prefix(count)) }
+        return v
+    }
+
     // Older firmware omits the newer fields — decode them as sensible defaults
     // (pre-P1 has no radio_type; pre-P2b has no mode/peer/interlock).
     init(from decoder: Decoder) throws {
@@ -137,6 +146,8 @@ struct DeviceConfig: Codable, Equatable {
         region    = try c.decode(Int.self, forKey: .region)
         guardMs   = try c.decode(Int.self, forKey: .guardMs)
         bands     = try c.decode([Int].self, forKey: .bands)
+        // Older firmware (pre-v7) omits the fallback map — default all-none, same length as bands.
+        bands2    = DeviceConfig.normalizedInts(try c.decodeIfPresent([Int].self, forKey: .bands2), count: bands.count)
         mode            = try c.decodeIfPresent(CtrlMode.self, forKey: .mode) ?? .standalone
         peerHost        = try c.decodeIfPresent(String.self, forKey: .peerHost) ?? ""
         interlockPolicy = try c.decodeIfPresent(InterlockPolicy.self, forKey: .interlockPolicy) ?? .firstCome
@@ -152,6 +163,7 @@ struct DeviceConfig: Codable, Equatable {
 
     init(hostname: String, ssid: String, radioType: RadioType = .tci,
          tciHost: String, tciPort: Int, region: Int, guardMs: Int, bands: [Int],
+         bands2: [Int]? = nil,
          mode: CtrlMode = .standalone, peerHost: String = "",
          interlockPolicy: InterlockPolicy = .firstCome, onPeerLoss: PeerLoss = .safe,
          radio2Type: RadioType = .tci, radio2Host: String = "", radio2Port: Int = 50001,
@@ -160,6 +172,7 @@ struct DeviceConfig: Codable, Equatable {
         self.hostname = hostname; self.ssid = ssid; self.radioType = radioType
         self.tciHost = tciHost; self.tciPort = tciPort; self.region = region
         self.guardMs = guardMs; self.bands = bands
+        self.bands2 = DeviceConfig.normalizedInts(bands2, count: bands.count)
         self.mode = mode; self.peerHost = peerHost
         self.interlockPolicy = interlockPolicy; self.onPeerLoss = onPeerLoss
         self.radio2Type = radio2Type; self.radio2Host = radio2Host
@@ -195,6 +208,9 @@ struct DeviceConfig: Codable, Equatable {
         if !otaPassword.isEmpty  { items.append(URLQueryItem(name: "otapass", value: otaPassword)) }
         for (i, relay) in bands.enumerated() {
             items.append(URLQueryItem(name: "b\(i)", value: String(relay)))
+        }
+        for (i, relay) in bands2.enumerated() {
+            items.append(URLQueryItem(name: "s\(i)", value: String(relay)))
         }
         for (i, name) in relayNames.enumerated() {
             items.append(URLQueryItem(name: "rn\(i)", value: name))

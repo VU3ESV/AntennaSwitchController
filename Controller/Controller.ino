@@ -124,13 +124,22 @@ int desiredFor(RadioSource* r, bool link) {
   return g_cfg.band_relay[b];
 }
 
+// The band's SO2R fallback antenna (used when the primary is taken by the other
+// radio); -1 = none. Only consulted by the interlock (standalone never falls back).
+int secondaryFor(RadioSource* r, bool link) {
+  int b = r->band();
+  if (!link || b < 0) return -1;
+  return g_cfg.band_relay2[b];
+}
+
 // Resolve the local desired antenna through the active mode's interlock
-// (single-relay modes only; dual is driven separately in loop()).
-int interlockResolve(int localDesired) {
+// (single-relay modes only; dual is driven separately in loop()). `secondary`
+// is the band's fallback, taken when first-come leaves this radio blocked.
+int interlockResolve(int primary, int secondary) {
   switch (g_cfg.mode) {
-    case MODE_MASTER: g_master.tick(); return g_master.resolveMaster(localDesired);
-    case MODE_SLAVE:  return g_slave.resolve(localDesired);
-    default:          return localDesired;   // standalone
+    case MODE_MASTER: g_master.tick(); return g_master.resolveMaster(primary, secondary);
+    case MODE_SLAVE:  return g_slave.resolve(primary, secondary);
+    default:          return primary;   // standalone
   }
 }
 
@@ -334,11 +343,13 @@ void loop() {
     // lines. Manual override forces Radio 1; Radio 2 stays automatic.
     bool tx1 = g_radio->isTx()  || g_radio->isTune();
     bool tx2 = g_radio2->isTx() || g_radio2->isTune();
-    int d1 = (g_override != -2) ? (g_override == -1 ? -1 : g_override)
-                                : desiredFor(g_radio, link);
+    bool ovr = (g_override != -2);
+    int d1 = ovr ? (g_override == -1 ? -1 : g_override) : desiredFor(g_radio, link);
+    int s1 = ovr ? -1 : secondaryFor(g_radio, link);   // override is explicit, no fallback
     int d2 = desiredFor(g_radio2, link2);
+    int s2 = secondaryFor(g_radio2, link2);
     int a1, a2;
-    g_resolver.resolve(d1, d2, tx1, tx2, a1, a2);  // TX-safety inside resolver
+    g_resolver.resolve(d1, s1, d2, s2, tx1, tx2, a1, a2);  // TX-safety + fallback inside
     g_dual.setInhibit(false);
     g_dual.setDual(a1, a2);
     g_dual.tick();                                  // break-before-make (R2 line)
@@ -347,13 +358,14 @@ void loop() {
     // R2.9: no hot-switching while the radio is transmitting/tuning.
     g_out.setInhibit(g_radio->isTx() || g_radio->isTune());
 
-    int localDesired;
-    if (g_override != -2) localDesired = (g_override == -1) ? -1 : g_override;  // R2.11
-    else                  localDesired = desiredFor(g_radio, link);            // R2.7/R2.10
+    int localDesired, localSecondary;
+    if (g_override != -2) { localDesired = (g_override == -1) ? -1 : g_override; localSecondary = -1; }  // R2.11
+    else { localDesired = desiredFor(g_radio, link); localSecondary = secondaryFor(g_radio, link); }     // R2.7/R2.10
 
     // SO2R Mode A: arbitrate against the peer so the two radios never share an
-    // antenna index (standalone passes through unchanged).
-    int desired = interlockResolve(localDesired);
+    // antenna index (standalone passes through unchanged). On a first-come
+    // block the band's secondary antenna is used if free.
+    int desired = interlockResolve(localDesired, localSecondary);
     g_out.setDesired(desired);
     g_out.tick();                                   // break-before-make
     digitalWrite(STATUS_LED, rawLink ? LOW : HIGH); // LED on = radio linked

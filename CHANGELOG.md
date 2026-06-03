@@ -12,6 +12,18 @@ work. See the [GitHub Releases] for downloads.
 
 ## [Unreleased]
 ### Added
+- **Per-band fallback antenna for SO2R (P4 / multiband antennas).** Each band now
+  has an optional **secondary** antenna in addition to its primary. In SO2R
+  (Master/Slave or Dual) when the primary antenna is already in use by the other
+  radio, the controller switches that radio to the band's fallback instead of
+  dropping it to none — e.g. a **HexBeam** shared across 20–6 m with a wire dipole
+  as the fallback. The fallback is honoured by the Mode A master, the Mode A slave
+  (claims the secondary when the master denies the primary), and the Mode B
+  `DualResolver`; a transmitting radio is never moved or preempted (R2.9).
+  Standalone units ignore it (no contention). Config **v7** (`band_relay2[]`,
+  exposed via `/config` `bands2` + `/save` `s0..s10`); v6→v7 migration preserves
+  all settings. App + web band map gain a "Fallback" column (shown only for SO2R
+  modes). See [docs/MULTI-RADIO-SO2R-PLAN.md §11](docs/MULTI-RADIO-SO2R-PLAN.md).
 - **Per-relay (antenna) names.** Name each relay — e.g. "80m Dipole", "Hexbeam" —
   in the app's Settings or the controller's web page. The names replace the
   generic "R1–R8" everywhere (dashboard active relay, controls buttons, band→relay

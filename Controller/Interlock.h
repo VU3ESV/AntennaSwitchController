@@ -38,15 +38,21 @@ class MasterArbiter {
   void setPolicy(uint8_t policy) { policy_ = policy; }
 
   // Resolve the MASTER radio's desired antenna against what the slave holds.
-  // Returns the antenna the master may drive (its desired, or -1 if blocked).
-  int resolveMaster(int desired) {
+  // `secondary` is the band's fallback antenna (-1 = none): when first-come
+  // leaves the master blocked on its primary, it takes the secondary if that is
+  // free. Returns the antenna the master may drive (or -1 if blocked).
+  int resolveMaster(int desired, int secondary = -1) {
     if (desired < 0) { masterAnt_ = -1; return -1; }
     if (slaveHeld() && slaveAnt_ == desired) {
       if (policy_ == ILK_PRIORITY) {        // master preempts the slave
         slaveAnt_ = -1;                      // slave denied on its next beat
         masterAnt_ = desired; return desired;
       }
-      masterAnt_ = -1; return -1;            // first-come: slave keeps it
+      // first-come: slave keeps the primary; try the band's secondary instead.
+      if (secondary >= 0 && !(slaveHeld() && slaveAnt_ == secondary)) {
+        masterAnt_ = secondary; return secondary;
+      }
+      masterAnt_ = -1; return -1;
     }
     masterAnt_ = desired; return desired;
   }
@@ -95,25 +101,29 @@ class DualResolver {
  public:
   void setPolicy(uint8_t policy) { policy_ = policy; }
 
-  // Resolve desired antennas d1 (Radio 1) and d2 (Radio 2), each -1..7, into
-  // granted outputs a1/a2 (guaranteed a1 != a2, or one is -1). tx1/tx2 hold the
-  // respective radio's antenna fixed while it transmits.
-  void resolve(int d1, int d2, bool tx1, bool tx2, int& a1, int& a2) {
-    a1 = tx1 ? cur1_ : d1;        // don't move a radio's antenna under TX
-    a2 = tx2 ? cur2_ : d2;
+  // Resolve desired antennas for Radio 1 / Radio 2 into granted outputs a1/a2
+  // (guaranteed a1 != a2, or one is -1). Each radio has a primary (p1/p2) and a
+  // per-band secondary fallback (s1/s2, -1 = none). On a collision the loser
+  // falls back to its secondary if that is free, else none. tx1/tx2 hold the
+  // respective radio's antenna fixed while it transmits (R2.9) — a transmitting
+  // radio is never moved or preempted.
+  void resolve(int p1, int s1, int p2, int s2, bool tx1, bool tx2, int& a1, int& a2) {
+    a1 = tx1 ? cur1_ : p1;        // don't move a radio's antenna under TX
+    a2 = tx2 ? cur2_ : p2;
 
     if (a1 >= 0 && a1 == a2) {    // both want the same antenna → arbitrate
       bool r1Holds = (cur1_ == a1);
       bool r2Holds = (cur2_ == a2);
-      if (policy_ == ILK_PRIORITY) {          // Radio 1 wins
-        a2 = -1;
-      } else if (r1Holds && !r2Holds) {       // first-come: R1 already on it
-        a2 = -1;
-      } else if (r2Holds && !r1Holds) {       // first-come: R2 already on it
-        a1 = -1;
-      } else {                                // neither (or both) held → R1
-        a2 = -1;
-      }
+      bool r1Wins;
+      if      (tx1) r1Wins = true;            // never move a transmitting radio
+      else if (tx2) r1Wins = false;
+      else if (policy_ == ILK_PRIORITY) r1Wins = true;   // Radio 1 wins
+      else if (r1Holds && !r2Holds) r1Wins = true;       // first-come: R1 on it
+      else if (r2Holds && !r1Holds) r1Wins = false;      // first-come: R2 on it
+      else r1Wins = true;                                // neither/both → R1
+
+      if (r1Wins) a2 = (!tx2 && s2 >= 0 && s2 != a1) ? s2 : -1;  // loser → secondary/none
+      else        a1 = (!tx1 && s1 >= 0 && s1 != a2) ? s1 : -1;
     }
     cur1_ = a1;
     cur2_ = a2;
@@ -140,31 +150,43 @@ class SlaveClient {
   int  missedBeats() const { return missed_; }
 
   // Resolve the SLAVE radio's desired antenna by claiming it from the master.
-  // Returns the antenna the slave may drive (granted, or -1). The claim/release
-  // doubles as the heartbeat: it fires when the desire changes or every
-  // HB_BEAT_MS, keeping the master's contact timer alive. A failed beat is
-  // tolerated (the current grant is held) until HB_MAX_MISS consecutive misses,
-  // at which point the master is declared lost and on_peer_loss applies — so a
-  // single dropped packet never drops the antenna.
-  int resolve(int desired) {
+  // `primary` is the band's relay; `secondary` (-1 = none) is the fallback tried
+  // when the master denies the primary (it holds it for Radio 1). Returns the
+  // antenna the slave may drive (granted, or -1). The claim/release doubles as
+  // the heartbeat: it fires when the desire changes or every HB_BEAT_MS, keeping
+  // the master's contact timer alive. A failed beat is tolerated (the current
+  // grant is held) until HB_MAX_MISS consecutive misses, at which point the
+  // master is declared lost and on_peer_loss applies — so a single dropped
+  // packet never drops the antenna.
+  int resolve(int primary, int secondary = -1) {
     uint32_t now = millis();
-    bool due = (desired != lastDesired_) || (uint32_t)(now - lastBeat_) >= HB_BEAT_MS;
+    bool due = (primary != lastDesired_) || (uint32_t)(now - lastBeat_) >= HB_BEAT_MS;
     if (!due) return allowed_;
-    lastBeat_ = now; lastDesired_ = desired;
+    lastBeat_ = now; lastDesired_ = primary;
 
     if (strlen(host_) == 0) { missed_ = HB_MAX_MISS; peerUp_ = false; return failsafe(); }
 
     bool granted = false;
-    int code = (desired < 0)
+    int code = (primary < 0)
              ? post("/interlock/release", granted)
-             : post(String("/interlock/claim?ant=") + desired, granted);
+             : post(String("/interlock/claim?ant=") + primary, granted);
 
     if (code != 200) return missedBeat();      // debounce transient loss
+    missed_ = 0; peerUp_ = true;               // heartbeat ok
 
-    missed_  = 0;                               // heartbeat ok
-    peerUp_  = true;
-    allowed_ = (desired < 0) ? -1 : (granted ? desired : -1);
-    return allowed_;
+    if (primary < 0)     { allowed_ = -1;      return allowed_; }
+    if (granted)         { allowed_ = primary; return allowed_; }
+
+    // Primary denied (master holds it). Try the band's secondary fallback; a
+    // failed claim here still counts as a good beat (the primary reached the
+    // master), so we only fall through to none.
+    if (secondary >= 0) {
+      bool g2 = false;
+      if (post(String("/interlock/claim?ant=") + secondary, g2) == 200 && g2) {
+        allowed_ = secondary; return allowed_;
+      }
+    }
+    allowed_ = -1; return allowed_;
   }
 
  private:
