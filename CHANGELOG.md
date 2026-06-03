@@ -11,6 +11,9 @@ work. See the [GitHub Releases] for downloads.
 [GitHub Releases]: https://github.com/VU3ESV/AntennaSwitchController/releases
 
 ## [Unreleased]
+_Nothing yet._
+
+## [v0.1.25] — 2026-06-03
 ### Added
 - **Serial CAT radio support (read-only) — P1.** A radio can now be tracked over
   **serial CAT** on the board's UART, in addition to TCI and FlexRadio: **Kenwood
@@ -24,6 +27,9 @@ work. See the [GitHub Releases] for downloads.
   converters are required — see [docs/HARDWARE.md §3](docs/HARDWARE.md). The CAT
   frequency parsers have host unit tests; **the serial path is build-verified
   only (no live rig tested).**
+
+## [v0.1.24] — 2026-06-03
+### Added
 - **Pick the SO2R master from mDNS discovery.** In Slave mode, Settings offers a
   "Pick master from network" menu of the controllers found via Bonjour
   (`_antsw._tcp`), excluding this unit; selecting one fills in the master address
