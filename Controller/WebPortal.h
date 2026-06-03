@@ -104,6 +104,14 @@ class WebPortal {
     return "Relay " + String(r + 1);
   }
 
+  // True when band `b` is mapped to relay `r` whose declared coverage (non-zero)
+  // does not include `b` — i.e. an antenna assigned a band it can't work.
+  static bool coverageMismatch(const Config& c, int r, int b) {
+    if (r < 0 || r >= NUM_RELAYS) return false;
+    if (c.relay_bands[r] == 0) return false;            // undeclared → no check
+    return !(c.relay_bands[r] & (1u << b));
+  }
+
   void handleRoot() {
     Config& c = *cfg_;
     String h;
@@ -147,16 +155,36 @@ class WebPortal {
       h += "<option value=" + String(r) + (c.iaru_region == r ? " selected" : "") + ">" + String(r) + "</option>";
     h += F("</select></fieldset>");
 
-    // --- relay (antenna) names ---
-    h += F("<fieldset><legend>Relay names</legend>"
-           "<p class=muted>Name each relay's antenna (e.g. \"80m Dipole\"). "
-           "Blank uses the default \"Relay N\". Shown in the app and the band map below.</p><table>");
+    // --- antennas: name + band coverage + feed/group (multiband model, §11) ---
+    h += F("<fieldset><legend>Antennas</legend>"
+           "<p class=muted>Name each relay's antenna (e.g. \"HexBeam\") and tick the "
+           "bands it covers. Coverage is used to warn about mis-assignments in the map "
+           "below; leave all unticked to skip the check. <b>Triplexed</b> legs of one "
+           "physical antenna (sharing a group) may serve both radios at once.</p>");
     for (int r = 0; r < NUM_RELAYS; r++) {
-      h += "<tr><td><b>R" + String(r + 1) + "</b> <span class=muted>(GPIO" + String(kRelayPin[r]) + ")</span></td>"
-           "<td><input name=rn" + String(r) + " maxlength=15 value=\"" + esc(c.relay_name[r]) +
-           "\" placeholder=\"Relay " + String(r + 1) + "\"></td></tr>";
+      h += "<div style='border-top:1px solid #eee;padding:.4rem 0'>";
+      h += "<b>R" + String(r + 1) + "</b> <span class=muted>(GPIO" + String(kRelayPin[r]) + ")</span>";
+      h += "<input name=rn" + String(r) + " maxlength=15 value=\"" + esc(c.relay_name[r]) +
+           "\" placeholder=\"Relay " + String(r + 1) + "\">";
+      // Coverage: hidden 0 baseline + a checkbox per band (value = 1<<band).
+      h += "<input type=hidden name=rb" + String(r) + " value=0>";
+      h += F("<div style='font-size:.8rem'>");
+      for (int b = 0; b < NUM_BANDS; b++) {
+        bool on = c.relay_bands[r] & (1u << b);
+        h += "<label style='display:inline-block;width:3.2rem;margin:0'>"
+             "<input type=checkbox name=rb" + String(r) + " value=" + String(1u << b) +
+             (on ? " checked" : "") + ">" + String(bandName(b)) + "</label>";
+      }
+      h += F("</div><div class=row>");
+      h += "<div><label>Feed</label><select name=rf" + String(r) + ">";
+      h += "<option value=0" + String(c.relay_feed[r] == FEED_SINGLE    ? " selected" : "") + ">Single feedline</option>";
+      h += "<option value=1" + String(c.relay_feed[r] == FEED_TRIPLEXED ? " selected" : "") + ">Triplexed leg</option>";
+      h += "</select></div><div><label>Group <span class=muted>(0=none)</span></label>"
+           "<input name=rg" + String(r) + " type=number min=0 max=" + String(NUM_RELAYS) +
+           " value=" + String(c.relay_group[r]) + "></div>";
+      h += F("</div></div>");
     }
-    h += F("</table></fieldset>");
+    h += F("</fieldset>");
 
     h += F("<fieldset><legend>Band &rarr; Relay map</legend>"
            "<table><tr><td></td><td class=muted>Primary</td><td class=muted>Fallback (SO2R)</td></tr>");
@@ -175,12 +203,18 @@ class WebPortal {
       for (int r = 0; r < NUM_RELAYS; r++)
         h += "<option value=" + String(r) + (c.band_relay2[b] == r ? " selected" : "") +
              ">" + relayLabel(c, r) + "</option>";
-      h += F("</select></td></tr>");
+      h += F("</select></td>");
+      // Coverage warning: a mapped antenna whose declared coverage excludes this band.
+      bool warn = coverageMismatch(c, c.band_relay[b], b) || coverageMismatch(c, c.band_relay2[b], b);
+      h += "<td>";
+      if (warn) h += "<span style='color:#c00' title='antenna coverage excludes this band'>&#9888;</span>";
+      h += F("</td></tr>");
     }
     h += F("</table><p class=muted>Multiple bands may share one relay. "
            "<b>Fallback</b> is used in SO2R (Master/Slave or Dual) when the primary "
            "antenna is already in use by the other radio &mdash; e.g. a HexBeam on 20&ndash;6&nbsp;m "
-           "with a wire dipole as fallback. Relays on GPIO0/15/16 may twitch at power-up.</p></fieldset>");
+           "with a wire dipole as fallback. &#9888; = the assigned antenna's coverage "
+           "(set under Antennas) excludes that band. Relays on GPIO0/15/16 may twitch at power-up.</p></fieldset>");
 
     // --- SO2R Mode A (master/slave) ---
     h += F("<fieldset><legend>SO2R role (Mode A)</legend>");
@@ -287,6 +321,21 @@ class WebPortal {
     for (int r = 0; r < NUM_RELAYS; r++) {
       String key = "rn" + String(r);
       copyArg(key.c_str(), c.relay_name[r], RELAY_NAME_LEN, false);  // "" clears → default Rn
+      // Antenna metadata: band-coverage bitmask (rb), feed type (rf), group (rg).
+      // Coverage is submitted as one hidden rb<r>=0 plus a checkbox per band
+      // (value = 1<<band); sum every arg named rb<r> to rebuild the mask (a
+      // hidden 0 ensures clearing all boxes yields 0 rather than "unchanged").
+      String rb = "rb" + String(r);
+      if (server_.hasArg(rb)) {
+        uint16_t mask = 0;
+        for (int i = 0; i < server_.args(); i++)
+          if (server_.argName(i) == rb) mask |= (uint16_t)server_.arg(i).toInt();
+        c.relay_bands[r] = mask;
+      }
+      String rf = "rf" + String(r);
+      if (server_.hasArg(rf)) c.relay_feed[r]  = (uint8_t)constrain(server_.arg(rf).toInt(), 0, 1);
+      String rg = "rg" + String(r);
+      if (server_.hasArg(rg)) c.relay_group[r] = (uint8_t)constrain(server_.arg(rg).toInt(), 0, NUM_RELAYS);
     }
     configSave(c);
     if (saveFn_) saveFn_();
@@ -335,7 +384,7 @@ class WebPortal {
   void handleConfig() {
     Config& c = *cfg_;
     String j;
-    j.reserve(512);                 // whole config in one alloc (no per-append churn)
+    j.reserve(768);                 // whole config in one alloc (no per-append churn)
     j += "{";
     j += "\"hostname\":\""  + esc(c.hostname) + "\",";
     j += "\"ssid\":\""      + esc(c.wifi_ssid) + "\",";
@@ -370,6 +419,14 @@ class WebPortal {
       if (b) j += ",";
       j += String(c.band_relay2[b]);
     }
+    // Per-relay antenna metadata (multiband model): band-coverage bitmask, feed
+    // type, and triplexer group. Arrays are NUM_RELAYS long, relay 0..7.
+    j += "],\"relay_bands\":[";
+    for (int r = 0; r < NUM_RELAYS; r++) { if (r) j += ","; j += String(c.relay_bands[r]); }
+    j += "],\"relay_feed\":[";
+    for (int r = 0; r < NUM_RELAYS; r++) { if (r) j += ","; j += String(c.relay_feed[r]); }
+    j += "],\"relay_group\":[";
+    for (int r = 0; r < NUM_RELAYS; r++) { if (r) j += ","; j += String(c.relay_group[r]); }
     j += "]}";
     server_.send(200, "application/json", j);
   }

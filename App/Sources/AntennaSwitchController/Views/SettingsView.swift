@@ -51,18 +51,44 @@ struct SettingsView: View {
                 }
             }
 
-            Section("Relay Names") {
+            Section("Antennas") {
                 ForEach(0..<kRelayCount, id: \.self) { r in
-                    HStack {
-                        Text("R\(r + 1)")
-                            .font(.callout.monospacedDigit())
-                            .frame(width: 32, alignment: .leading)
-                            .foregroundStyle(.secondary)
-                        TextField("R\(r + 1) (GPIO\(kRelayGPIO[r]))", text: relayNameBinding(r))
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack {
+                            Text("R\(r + 1)")
+                                .font(.callout.monospacedDigit())
+                                .frame(width: 32, alignment: .leading)
+                                .foregroundStyle(.secondary)
+                            TextField("R\(r + 1) (GPIO\(kRelayGPIO[r]))", text: relayNameBinding(r))
+                        }
+                        HStack(spacing: 10) {
+                            // Band coverage (multiband model) — multi-select menu.
+                            Menu {
+                                ForEach(Band.allCases) { band in
+                                    Toggle(band.label, isOn: coverageBinding(r, band.rawValue))
+                                }
+                            } label: {
+                                Label(coverageLabel(r), systemImage: "antenna.radiowaves.left.and.right")
+                                    .font(.caption)
+                            }
+                            Spacer()
+                            Picker("", selection: feedBinding(r)) {
+                                Text("Single").tag(0); Text("Triplexed").tag(1)
+                            }
+                            .labelsHidden().fixedSize()
+                            Stepper("Grp \(vm.config.relayGroup[r])", value: groupBinding(r), in: 0...kRelayCount)
+                                .fixedSize().font(.caption)
+                        }
                     }
                 }
-                Text("Name each relay’s antenna (e.g. “80m Dipole”). Blank uses “R<n>”. Shown on the dashboard, controls, and band map.")
+                Text("Name each antenna and tick the bands it covers (used to warn about mis-assignments below; leave empty to skip). Triplexed legs of one physical antenna sharing a group may serve both radios at once.")
                     .font(.caption).foregroundStyle(.secondary)
+                if !AntennaCoverage.conflictingGroups(relayGroup: vm.config.relayGroup,
+                                                      relayBands: vm.config.relayBands).isEmpty {
+                    Label("A triplexer group has two legs covering the same band.",
+                          systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption).foregroundStyle(.orange)
+                }
             }
 
             Section("Band → Relay Map") {
@@ -72,6 +98,12 @@ struct SettingsView: View {
                         ForEach(0..<kRelayCount, id: \.self) { r in
                             Text("\(vm.config.relayLabel(r)) (GPIO\(kRelayGPIO[r]))").tag(r)
                         }
+                    }
+                    // Coverage warning: assigned antenna's declared bands exclude this one.
+                    if mismatchedBands.contains(band.rawValue) {
+                        Label("Assigned antenna's coverage excludes \(band.label).",
+                              systemImage: "exclamationmark.triangle.fill")
+                            .font(.caption).foregroundStyle(.orange)
                     }
                     // SO2R fallback antenna — only meaningful when two radios share
                     // this controller (Master/Slave/Dual); hidden for standalone.
@@ -224,5 +256,44 @@ struct SettingsView: View {
             get: { r < vm.config.relayNames.count ? vm.config.relayNames[r] : "" },
             set: { if r < vm.config.relayNames.count { vm.config.relayNames[r] = $0 } }
         )
+    }
+
+    // MARK: - Antenna metadata bindings
+
+    /// Toggle binding for one band bit in relay `r`'s coverage bitmask.
+    private func coverageBinding(_ r: Int, _ bandIndex: Int) -> Binding<Bool> {
+        Binding(
+            get: { r < vm.config.relayBands.count && (vm.config.relayBands[r] & (1 << bandIndex)) != 0 },
+            set: { on in
+                guard r < vm.config.relayBands.count else { return }
+                if on { vm.config.relayBands[r] |=  (1 << bandIndex) }
+                else  { vm.config.relayBands[r] &= ~(1 << bandIndex) }
+            }
+        )
+    }
+
+    private func feedBinding(_ r: Int) -> Binding<Int> {
+        Binding(get: { r < vm.config.relayFeed.count ? vm.config.relayFeed[r] : 0 },
+                set: { if r < vm.config.relayFeed.count { vm.config.relayFeed[r] = $0 } })
+    }
+
+    private func groupBinding(_ r: Int) -> Binding<Int> {
+        Binding(get: { r < vm.config.relayGroup.count ? vm.config.relayGroup[r] : 0 },
+                set: { if r < vm.config.relayGroup.count { vm.config.relayGroup[r] = $0 } })
+    }
+
+    /// Compact label for a relay's coverage menu: "All bands", "None", or a count.
+    private func coverageLabel(_ r: Int) -> String {
+        let mask = r < vm.config.relayBands.count ? vm.config.relayBands[r] : 0
+        let n = AntennaCoverage.coveredLabels(mask: mask).count
+        if n == 0 { return "Any band" }
+        if n == Band.allCases.count { return "All bands" }
+        return "\(n) band\(n == 1 ? "" : "s")"
+    }
+
+    /// Band indices the current map assigns to an antenna that doesn't cover them.
+    private var mismatchedBands: Set<Int> {
+        AntennaCoverage.mismatchedBands(bands: vm.config.bands, bands2: vm.config.bands2,
+                                        relayBands: vm.config.relayBands)
     }
 }

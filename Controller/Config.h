@@ -17,7 +17,9 @@
 #define CFG_MAGIC_V4 0x414E5434UL  // "ANT4" — v4: adds radio 2 + switch_type (Mode B)
 #define CFG_MAGIC_V5 0x414E5435UL  // "ANT5" — v5: adds per-radio TCI receiver index
 #define CFG_MAGIC_V6 0x414E5436UL  // "ANT6" — v6: adds per-relay names
-#define CFG_MAGIC    0x414E5437UL  // "ANT7" — v7: adds per-band secondary (fallback) relay
+#define CFG_MAGIC_V7 0x414E5437UL  // "ANT7" — v7: adds per-band secondary (fallback) relay
+#define CFG_MAGIC    0x414E5438UL  // "ANT8" — v8: adds per-relay antenna metadata
+                                   //              (band coverage + feed type + group)
 #define EEPROM_SIZE  1024          // grew past 512 with relay names; ESP8266
                                    // reserves a 4 KB flash sector regardless
 
@@ -25,6 +27,12 @@
 #define NUM_RELAYS 8               // matches OutputStage.h (relays 0..7)
 #endif
 #define RELAY_NAME_LEN 16          // per-relay display name (15 chars + null)
+
+// Antenna feed type (per relay/port), for multiband-antenna modelling
+// (docs/MULTI-RADIO-SO2R-PLAN.md §11). SINGLE = one feedline, all its bands are
+// mutually exclusive across radios. TRIPLEXED = one leg of a band-split antenna;
+// legs of the same group may be used by both radios at once (different ports).
+enum FeedType : uint8_t { FEED_SINGLE = 0, FEED_TRIPLEXED = 1 };
 
 // Radio transport for a radio source.
 enum RadioType : uint8_t { RADIO_TCI = 0, RADIO_FLEX = 1 };
@@ -80,7 +88,41 @@ struct Config {
   char     relay_name[NUM_RELAYS][RELAY_NAME_LEN];  // per-relay name ("" = default Rn)
   int8_t   band_relay2[NUM_BANDS];// SO2R fallback: relay used when band_relay[b]
                                  // is taken by the other radio (-1 = none)
+  uint16_t relay_bands[NUM_RELAYS]; // antenna band-coverage bitmask (bit b = Band b);
+                                 // 0 = undeclared (no validation). Multiband model.
+  uint8_t  relay_feed[NUM_RELAYS];  // FeedType per relay (single / triplexed)
+  uint8_t  relay_group[NUM_RELAYS]; // 0 = none; else a group id shared by the legs
+                                 // of one triplexed physical antenna
   uint32_t crc;                  // CRC32 over all preceding bytes
+};
+
+// Frozen v7 layout — migrate v7 saved configs (fallback map, no antenna metadata).
+// DO NOT edit: must match exactly what shipped at the v7 bump.
+struct ConfigV7 {
+  uint32_t magic;
+  char     wifi_ssid[33];
+  char     wifi_pass[65];
+  char     tci_host[64];
+  uint16_t tci_port;
+  uint8_t  iaru_region;
+  uint8_t  radio_type;
+  char     hostname[33];
+  char     ota_pass[33];
+  uint16_t guard_ms;
+  int8_t   band_relay[NUM_BANDS];
+  uint8_t  mode;
+  char     peer_host[64];
+  uint8_t  interlock_policy;
+  uint8_t  on_peer_loss;
+  uint8_t  radio2_type;
+  char     radio2_host[64];
+  uint16_t radio2_port;
+  uint8_t  switch_type;
+  uint8_t  radio_rx;
+  uint8_t  radio2_rx;
+  char     relay_name[NUM_RELAYS][RELAY_NAME_LEN];
+  int8_t   band_relay2[NUM_BANDS];
+  uint32_t crc;
 };
 
 // Frozen v6 layout — migrate v6 saved configs (relay names, no secondary map).
@@ -276,6 +318,12 @@ inline void clampConfig(Config& c) {
   if (c.radio_rx  > 1)                 c.radio_rx         = 0;
   if (c.radio2_rx > 1)                 c.radio2_rx        = 0;
   for (int i = 0; i < NUM_RELAYS; i++) c.relay_name[i][RELAY_NAME_LEN - 1] = '\0';
+  const uint16_t bandMask = (uint16_t)((1u << NUM_BANDS) - 1);
+  for (int i = 0; i < NUM_RELAYS; i++) {
+    c.relay_bands[i] &= bandMask;                       // only valid band bits
+    if (c.relay_feed[i] > FEED_TRIPLEXED) c.relay_feed[i] = FEED_SINGLE;
+    if (c.relay_group[i] > NUM_RELAYS)    c.relay_group[i] = 0;   // 0..8
+  }
 }
 
 // Migrate a v1 image (no radio_type, no mode) into v3. configDefaults() supplies
@@ -454,7 +502,44 @@ inline bool configMigrateV6(Config& c) {
   return true;
 }
 
-// Returns true if a valid config was loaded (incl. a migrated v1..v6); false
+// Migrate a v7 image (fallback map, no antenna metadata) into v8 — keeps
+// everything; the new per-relay band coverage / feed / group default to 0
+// (undeclared single-feed, no group → no validation, behaviour unchanged).
+inline bool configMigrateV7(Config& c) {
+  ConfigV7 v7;
+  EEPROM.begin(EEPROM_SIZE);
+  EEPROM.get(0, v7);
+  EEPROM.end();
+  if (v7.magic != CFG_MAGIC_V7) return false;
+  if (crc32(reinterpret_cast<const uint8_t*>(&v7), offsetof(ConfigV7, crc)) != v7.crc) return false;
+
+  configDefaults(c);                                // zeroes relay_bands/feed/group
+  memcpy(c.wifi_ssid, v7.wifi_ssid, sizeof(c.wifi_ssid));
+  memcpy(c.wifi_pass, v7.wifi_pass, sizeof(c.wifi_pass));
+  memcpy(c.tci_host,  v7.tci_host,  sizeof(c.tci_host));
+  c.tci_port    = v7.tci_port;
+  c.iaru_region = v7.iaru_region;
+  c.radio_type  = v7.radio_type;
+  memcpy(c.hostname, v7.hostname, sizeof(c.hostname));
+  memcpy(c.ota_pass, v7.ota_pass, sizeof(c.ota_pass));
+  c.guard_ms = v7.guard_ms;
+  memcpy(c.band_relay, v7.band_relay, sizeof(c.band_relay));
+  c.mode             = v7.mode;
+  memcpy(c.peer_host, v7.peer_host, sizeof(c.peer_host));
+  c.interlock_policy = v7.interlock_policy;
+  c.on_peer_loss     = v7.on_peer_loss;
+  c.radio2_type      = v7.radio2_type;
+  memcpy(c.radio2_host, v7.radio2_host, sizeof(c.radio2_host));
+  c.radio2_port      = v7.radio2_port;
+  c.switch_type      = v7.switch_type;
+  c.radio_rx         = v7.radio_rx;
+  c.radio2_rx        = v7.radio2_rx;
+  memcpy(c.relay_name, v7.relay_name, sizeof(c.relay_name));
+  memcpy(c.band_relay2, v7.band_relay2, sizeof(c.band_relay2));
+  return true;
+}
+
+// Returns true if a valid config was loaded (incl. a migrated v1..v7); false
 // if defaults were applied (blank/corrupt EEPROM → safe defaults, caller should
 // enter setup/AP mode).
 inline bool configLoad(Config& c) {
@@ -465,10 +550,11 @@ inline bool configLoad(Config& c) {
     clampConfig(c);
     return true;
   }
-  if (configMigrateV6(c) || configMigrateV5(c) || configMigrateV4(c) ||
-      configMigrateV3(c) || configMigrateV2(c) || configMigrateV1(c)) {
+  if (configMigrateV7(c) || configMigrateV6(c) || configMigrateV5(c) ||
+      configMigrateV4(c) || configMigrateV3(c) || configMigrateV2(c) ||
+      configMigrateV1(c)) {
     clampConfig(c);
-    configSave(c);                                 // persist as v7 (migrate once)
+    configSave(c);                                 // persist as v8 (migrate once)
     return true;
   }
   configDefaults(c);
