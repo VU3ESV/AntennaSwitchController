@@ -42,7 +42,7 @@ jobs:
       tag: ${{ steps.tag.outputs.tag }}
       value: ${{ steps.tag.outputs.value }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           ref: main
           fetch-depth: 0      # full tags for auto-bump
@@ -81,7 +81,7 @@ jobs:
     if: github.event_name != 'pull_request' || github.event.pull_request.merged == true
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: arduino/setup-arduino-cli@v2
 
@@ -108,7 +108,7 @@ jobs:
           cp fw/Controller.ino.bin AntennaSwitchController-firmware.bin
           ls -la AntennaSwitchController-firmware.bin
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: firmware
           path: AntennaSwitchController-firmware.bin
@@ -120,7 +120,7 @@ jobs:
     if: github.event_name != 'pull_request' || github.event.pull_request.merged == true
     runs-on: macos-14
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Build signed + notarized DMG (app with embedded extension)
         working-directory: App
@@ -153,7 +153,7 @@ jobs:
           brew list xcodegen >/dev/null 2>&1 || brew install xcodegen
           ./scripts/make-radioplugin.sh        # -> App/dist/AntennaSwitch.radioplugin
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: macos-app
           # the app .dmg + the plugin (an ADDITIONAL artifact alongside the app)
@@ -168,12 +168,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Download artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: artifacts
 
       - name: Publish release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ needs.version.outputs.tag }}
           name: ${{ needs.version.outputs.tag }}
