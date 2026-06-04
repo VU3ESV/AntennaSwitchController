@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- ExtensionKit extensions must be sandboxed for macOS to register and load them. -->
+	<key>com.apple.security.app-sandbox</key>
+	<true/>
+	<!-- The antenna switch is discovered over Bonjour/mDNS and controlled over HTTP on the LAN.
+	     Outgoing connections + Bonjour browsing both require the network-client entitlement. -->
+	<key>com.apple.security.network.client</key>
+	<true/>
+</dict>
+</plist>

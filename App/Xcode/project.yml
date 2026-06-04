@@ -44,6 +44,8 @@ targets:
         MARKETING_VERSION: "1.0.0"
         CODE_SIGN_STYLE: Manual
         CODE_SIGN_IDENTITY: "-"      # ad-hoc for local dev; Developer-ID needed to ship
+        ENABLE_HARDENED_RUNTIME: YES                                 # required for notarization
+        CODE_SIGN_ENTITLEMENTS: Extension/AntennaSwitch.entitlements # app-sandbox + network.client -> macOS registers it
     dependencies:
       - package: RadioPluginKit
         product: RadioPluginKit
