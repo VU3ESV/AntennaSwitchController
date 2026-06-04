@@ -25,7 +25,7 @@ jobs:
       run:
         working-directory: App
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Toolchain
         run: swift --version
@@ -52,7 +52,7 @@ jobs:
           ls -lh dist/AntennaSwitch.radioplugin
 
       - name: Upload app bundle (non-canonical; release is the real artifact)
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: AntennaSwitchController-app-ci
           path: App/dist/Antenna Switch Controller.app
@@ -62,7 +62,7 @@ jobs:
     name: ESP8266 firmware
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: arduino/setup-arduino-cli@v2
 
