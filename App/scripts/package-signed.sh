@@ -82,18 +82,42 @@ else
 fi
 codesign --verify --strict --verbose=2 "$APP"
 
+# --- helper: submit to the notary service ----------------------------------------------
+notarize() {  # $1 = path to a .zip or .dmg to submit
+  xcrun notarytool submit "$1" \
+    --apple-id "$NOTARY_APPLE_ID" --team-id "${NOTARY_TEAM_ID:-}" --password "$NOTARY_PASSWORD" --wait
+}
+HAVE_NOTARY=0
+if [ -n "$IDENTITY" ] && [ -n "${NOTARY_APPLE_ID:-}" ] && [ -n "${NOTARY_PASSWORD:-}" ]; then
+  HAVE_NOTARY=1
+fi
+
+# Notarize the APP and staple it first, so the bundle carries its ticket even offline and
+# once copied out of the DMG (not just while the DMG is mounted).
+if [ "$HAVE_NOTARY" = 1 ]; then
+  echo "==> Notarizing the app + stapling (a few minutes)…"
+  AZIP="$(mktemp -d)/app.zip"
+  ditto -c -k --keepParent "$APP" "$AZIP"
+  notarize "$AZIP"
+  xcrun stapler staple "$APP"
+fi
+
 echo "==> Building DMG"
 ./scripts/make-dmg.sh
 DMG="dist/Antenna-Switch-Controller-macOS.dmg"
 
-# --- notarize + staple the DMG ----------------------------------------------------------
-if [ -n "$IDENTITY" ] && [ -n "${NOTARY_APPLE_ID:-}" ] && [ -n "${NOTARY_PASSWORD:-}" ]; then
-  echo "==> Notarizing $DMG (a few minutes)…"
-  xcrun notarytool submit "$DMG" \
-    --apple-id "$NOTARY_APPLE_ID" --team-id "${NOTARY_TEAM_ID:-}" --password "$NOTARY_PASSWORD" --wait
+# Codesign the DMG container too (so `spctl -t open` accepts it and it mounts without a
+# Gatekeeper prompt), then notarize + staple the DMG itself.
+if [ -n "$IDENTITY" ]; then
+  echo "==> Codesigning the DMG"
+  codesign --force -s "$IDENTITY" --timestamp "$DMG"
+fi
+if [ "$HAVE_NOTARY" = 1 ]; then
+  echo "==> Notarizing the DMG + stapling (a few minutes)…"
+  notarize "$DMG"
   xcrun stapler staple "$DMG"
-  echo "==> Notarized + stapled."
+  echo "==> Notarized + stapled (app + DMG)."
 else
-  echo "==> Skipping notarization (no NOTARY_* secrets) — DMG signed but not notarized."
+  echo "==> Skipping notarization (no NOTARY_* secrets) — signed but not notarized."
 fi
 echo "==> Done: $DMG"
