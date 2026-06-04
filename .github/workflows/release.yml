@@ -172,6 +172,48 @@ jobs:
         with:
           path: artifacts
 
+      - name: Compose release notes
+        env:
+          # 'true' only when the macOS app signing + notary secrets are present (notarized build).
+          NOTARIZED: ${{ secrets.MACOS_CERT_P12_BASE64 != '' && secrets.NOTARY_PASSWORD != '' }}
+        run: |
+          set -euo pipefail
+          {
+            echo "**Antenna Switch Controller** release — macOS app + ESP8266 firmware + Suite plugin."
+            echo
+            echo "## macOS app (\`Antenna-Switch-Controller-macOS.dmg\`)"
+            echo "Universal binary (Apple Silicon + Intel)."
+            echo
+            if [ "${NOTARIZED}" = "true" ]; then
+              echo "Signed with Developer ID and **Apple-notarized** — no Gatekeeper bypass needed."
+              echo
+              echo "1. Open the DMG and drag **Antenna Switch Controller.app** to \`/Applications\`."
+              echo "2. Launch it. Allow **Local Network** access so discovery and controller communication work."
+            else
+              echo "> ⚠️ **Unsigned & not notarized.** macOS Gatekeeper will block it on another Mac until you clear the quarantine flag."
+              echo
+              echo "1. Open the DMG and drag **Antenna Switch Controller.app** to \`/Applications\`."
+              echo "2. Clear the quarantine attribute (one time):"
+              echo "   \`\`\`bash"
+              echo "   xattr -dr com.apple.quarantine \"/Applications/Antenna Switch Controller.app\""
+              echo "   \`\`\`"
+              echo "3. Launch it (first time: right-click → **Open**). Allow **Local Network** access so discovery and controller communication work."
+            fi
+            echo
+            echo "## Suite plugin (\`AntennaSwitch.radioplugin\`)"
+            echo "Install via the [Amateur Radio Suite](https://github.com/VU3ESV/AmateurRadioSuite) (*Manage Plugins → Install from File*) to run the controller out-of-process."
+            echo
+            echo "## Firmware (\`AntennaSwitchController-firmware.bin\`)"
+            echo "For the ESP8266 ESP-12F 8-channel relay board (built with \`eesz=4M1M\`)."
+            echo
+            echo "- **Over-the-air** (board already on the LAN):"
+            echo "  \`\`\`bash"
+            echo "  espota.py -i <board-ip> -p 8266 -f AntennaSwitchController-firmware.bin -r"
+            echo "  \`\`\`"
+            echo "  (\`espota.py\` ships with the ESP8266 Arduino core under \`tools/\`. No OTA password is set by default.)"
+            echo "- **USB** (board in flash mode): flash the \`.bin\` at offset \`0x0\` with \`esptool.py\`, or rebuild from \`Controller/\` with \`arduino-cli\`."
+          } > RELEASE_NOTES.md
+
       - name: Publish release
         uses: softprops/action-gh-release@v3
         with:
@@ -184,36 +226,4 @@ jobs:
             artifacts/macos-app/Antenna-Switch-Controller-macOS.dmg
             artifacts/macos-app/AntennaSwitch.radioplugin
             artifacts/firmware/AntennaSwitchController-firmware.bin
-          body: |
-            **Antenna Switch Controller** release — macOS app + ESP8266 firmware + Suite plugin.
-
-            ## macOS app (`Antenna-Switch-Controller-macOS.dmg`)
-            Universal binary (Apple Silicon + Intel).
-
-            > ⚠️ **Unsigned & not notarized.** macOS Gatekeeper will block it on
-            > another Mac until you clear the quarantine flag.
-
-            1. Open the DMG and drag **Antenna Switch Controller.app** to `/Applications`.
-            2. Clear the quarantine attribute (one time):
-               ```bash
-               xattr -dr com.apple.quarantine "/Applications/Antenna Switch Controller.app"
-               ```
-            3. Launch it (first time: right-click → **Open**). Allow **Local
-               Network** access so discovery and controller communication work.
-
-            ## Suite plugin (`AntennaSwitch.radioplugin`)
-            Install via the [Amateur Radio Suite](https://github.com/VU3ESV/AmateurRadioSuite)
-            (*Manage Plugins → Install from File*) to run the controller out-of-process.
-
-            ## Firmware (`AntennaSwitchController-firmware.bin`)
-            For the ESP8266 ESP-12F 8-channel relay board (built with
-            `eesz=4M1M`).
-
-            - **Over-the-air** (board already on the LAN):
-              ```bash
-              espota.py -i <board-ip> -p 8266 -f AntennaSwitchController-firmware.bin -r
-              ```
-              (`espota.py` ships with the ESP8266 Arduino core under
-              `tools/`. No OTA password is set by default.)
-            - **USB** (board in flash mode): flash the `.bin` at offset `0x0` with
-              `esptool.py`, or rebuild from `Controller/` with `arduino-cli`.
+          body_path: RELEASE_NOTES.md

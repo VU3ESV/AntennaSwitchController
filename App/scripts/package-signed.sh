@@ -70,12 +70,22 @@ if [ -n "${MACOS_CERT_P12_BASE64:-}" ]; then
   IDENTITY="$(security find-identity -v -p codesigning "$KC" | sed -n 's/.*"\(Developer ID Application: .*\)"/\1/p' | head -1)"
 fi
 
+# codesign with a few retries — Apple's secure-timestamp service is intermittently unavailable
+# ("The timestamp service is not available."), which would otherwise fail the whole release.
+cs() {
+  local n=1
+  until codesign "$@"; do
+    [ "$n" -ge 4 ] && return 1
+    echo "  codesign attempt $n failed — retrying in 15s…" >&2; sleep 15; n=$((n + 1))
+  done
+}
+
 # --- sign inside-out (extension first, then the app) ------------------------------------
 if [ -n "$IDENTITY" ]; then
   echo "==> Signing with: $IDENTITY"
-  codesign --force -s "$IDENTITY" -o runtime --timestamp \
+  cs --force -s "$IDENTITY" -o runtime --timestamp \
     --entitlements "$ENTITLEMENTS" "$APP/Contents/Extensions/$APPEX_NAME"
-  codesign --force -s "$IDENTITY" -o runtime --timestamp "$APP"
+  cs --force -s "$IDENTITY" -o runtime --timestamp "$APP"
 else
   echo "==> WARNING: no MACOS_CERT_P12_BASE64 — ad-hoc signing (extension will NOT register on other Macs)"
   codesign --force -s - --deep "$APP"
@@ -110,7 +120,7 @@ DMG="dist/Antenna-Switch-Controller-macOS.dmg"
 # Gatekeeper prompt), then notarize + staple the DMG itself.
 if [ -n "$IDENTITY" ]; then
   echo "==> Codesigning the DMG"
-  codesign --force -s "$IDENTITY" --timestamp "$DMG"
+  cs --force -s "$IDENTITY" --timestamp "$DMG"
 fi
 if [ "$HAVE_NOTARY" = 1 ]; then
   echo "==> Notarizing the DMG + stapling (a few minutes)…"
