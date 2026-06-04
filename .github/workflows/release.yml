@@ -122,12 +122,24 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Build universal release .app
+      - name: Build signed + notarized DMG (app with embedded extension)
         working-directory: App
         env:
           UNIVERSAL: "1"
           VERSION: ${{ needs.version.outputs.value }}
-        run: ./build-app.sh
+          # Signing/notarization secrets (see docs/SIGNING-SECRETS.md). When unset, the script
+          # falls back to ad-hoc and skips notarization — the build still succeeds, but the
+          # released app's extension will not register on other Macs.
+          MACOS_CERT_P12_BASE64: ${{ secrets.MACOS_CERT_P12_BASE64 }}
+          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+          NOTARY_APPLE_ID: ${{ secrets.NOTARY_APPLE_ID }}
+          NOTARY_TEAM_ID: ${{ secrets.NOTARY_TEAM_ID }}
+          NOTARY_PASSWORD: ${{ secrets.NOTARY_PASSWORD }}
+        run: |
+          sudo xcode-select -s "$(ls -d /Applications/Xcode*.app | sort -V | tail -1)"
+          brew list xcodegen >/dev/null 2>&1 || brew install xcodegen
+          ./scripts/package-signed.sh        # -> App/dist/Antenna-Switch-Controller-macOS.dmg
 
       - name: Verify universal binary
         working-directory: App
@@ -140,10 +152,6 @@ jobs:
           xcodebuild -version
           brew list xcodegen >/dev/null 2>&1 || brew install xcodegen
           ./scripts/make-radioplugin.sh        # -> App/dist/AntennaSwitch.radioplugin
-
-      - name: Package app as .dmg
-        working-directory: App
-        run: ./scripts/make-dmg.sh        # -> App/dist/Antenna-Switch-Controller-macOS.dmg
 
       - uses: actions/upload-artifact@v4
         with:
