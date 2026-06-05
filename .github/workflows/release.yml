@@ -31,12 +31,57 @@ env:
   GIT_CONFIG_VALUE_0: all
 
 jobs:
+  # Skip the whole release when a merged PR / pushed change only touches documentation.
+  # Tag pushes and manual dispatch always release. Downstream jobs need `version`, so
+  # gating it here cascades the skip to firmware/app/publish.
+  gate:
+    name: Decide whether to release (skip docs-only)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      skip: ${{ steps.decide.outputs.skip }}
+    steps:
+      - id: decide
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          ev="${{ github.event_name }}"
+          # Explicit releases are never skipped.
+          if [ "$ev" = "workflow_dispatch" ]; then echo "skip=false" >> "$GITHUB_OUTPUT"; exit 0; fi
+          if [ "$ev" = "push" ]; then
+            case "${{ github.ref }}" in
+              refs/tags/*) echo "skip=false" >> "$GITHUB_OUTPUT"; exit 0 ;;
+            esac
+            files="$(gh api --paginate "repos/${{ github.repository }}/compare/${{ github.event.before }}...${{ github.event.after }}" -q '.files[].filename' || true)"
+          elif [ "$ev" = "pull_request" ]; then
+            files="$(gh api --paginate "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files" -q '.[].filename')"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          echo "Changed files:"; printf '  %s\n' "$files"
+          # Docs-only when EVERY changed file is markdown, under docs/, or LICENSE.
+          skip=true
+          [ -z "$files" ] && skip=false   # unknown/empty diff -> release, don't skip
+          while IFS= read -r f; do
+            [ -z "$f" ] && continue
+            case "$f" in
+              *.md|docs/*|*/docs/*|LICENSE) : ;;
+              *) skip=false; break ;;
+            esac
+          done <<< "$files"
+          echo "skip=$skip" >> "$GITHUB_OUTPUT"
+          [ "$skip" = true ] && echo "::notice::Docs-only change — skipping release."
+
   # Resolve the release version up front so the macOS app can be stamped with it
   # at build time. The app and publish jobs both consume these outputs, so the
   # bundle's CFBundleShortVersionString always matches the published tag.
   version:
+    needs: gate
     name: Resolve version + tag
-    if: github.event_name != 'pull_request' || github.event.pull_request.merged == true
+    if: (github.event_name != 'pull_request' || github.event.pull_request.merged == true) && needs.gate.outputs.skip != 'true'
     runs-on: ubuntu-latest
     outputs:
       tag: ${{ steps.tag.outputs.tag }}
