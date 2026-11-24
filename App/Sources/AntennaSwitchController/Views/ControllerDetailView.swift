@@ -2,12 +2,14 @@ import SwiftUI
 import RadioPluginUI
 
 /// Detail pane for one controller: Dashboard / Controls / Settings tabs, plus
-/// toolbar actions (open web portal, reboot). Owns the polling view model.
+/// toolbar actions (open web portal, firmware update, reboot). Owns the polling
+/// view model.
 struct ControllerDetailView: View {
     let controller: Controller
     @EnvironmentObject private var store: ControllersStore
     @StateObject private var vm: ControllerViewModel
     @State private var confirmReboot = false
+    @State private var showFirmwareUpdate = false
 
     init(controller: Controller) {
         self.controller = controller
@@ -32,9 +34,16 @@ struct ControllerDetailView: View {
                 Button { vm.openWeb() } label: { Label("Open Web Portal", systemImage: "safari") }
             }
             ToolbarItem {
+                Button { showFirmwareUpdate = true } label: {
+                    Label("Update Firmware…", systemImage: "arrow.down.circle")
+                }
+                .help("Update the controller’s firmware over WiFi (OTA)")
+            }
+            ToolbarItem {
                 Button { confirmReboot = true } label: { Label("Reboot", systemImage: "arrow.clockwise.circle") }
             }
         }
+        .sheet(isPresented: $showFirmwareUpdate) { FirmwareUpdateView(controller: vm) }
         .confirmationDialog("Reboot \(controller.name)?", isPresented: $confirmReboot, titleVisibility: .visible) {
             Button("Reboot", role: .destructive) { Task { await vm.reboot() } }
             Button("Cancel", role: .cancel) {}

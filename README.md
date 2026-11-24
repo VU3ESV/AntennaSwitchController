@@ -72,6 +72,9 @@ python3 ~/Library/Arduino15/packages/esp8266/hardware/esp8266/*/tools/espota.py 
   -i <board-ip> -p 8266 -f /tmp/antsw_build/Controller.ino.bin -r
 ```
 
+Or skip the command line: the macOS app's **Update Firmware…** button does the same
+OTA update, from the latest release or a local `.bin` (see [The App](#the-app-macos)).
+
 On first boot (no WiFi saved) the controller starts a setup AP **`ANT-SW-Setup`**
 → open `http://192.168.4.1/` to enter WiFi + TCI settings. After that it joins
 your LAN as `ANT-SW-Controller-xx.local`.
@@ -174,6 +177,25 @@ on the network; add one by IP or pick a discovered unit:
 
 ![Add and discover](App/docs/images/app-empty-discovery.png)
 
+**Update Firmware… (OTA)** — the toolbar button flashes a controller over WiFi,
+using the same ArduinoOTA protocol as `espota.py` (no firmware change needed). Pick
+the **latest GitHub release** (downloaded and checked automatically) or a **local
+`.bin`** (e.g. your own `arduino-cli` build), enter the OTA password if one is set,
+and the app streams the image, waits for the controller to reboot, and confirms the
+new version. Every image is checked first: it must be an ESP8266 image that is
+actually Antenna Switch Controller firmware, so another project's `.bin` can't be
+flashed by mistake. The update won't start while a radio is transmitting, because
+entering OTA switches every relay off. If an update fails part-way, the relays stay
+off until the controller is rebooted, and the sheet offers **Reboot Controller**.
+
+![Firmware update](App/docs/images/app-firmware-update.png)
+
+> The controller connects **back** to the Mac during an update, so the app opens a
+> temporary listening port. The released (Developer ID-signed) app is allowed through
+> the macOS firewall automatically. A locally built app may need **Allow incoming
+> connections** in System Settings → Network → Firewall. In the suite, the plugin needs
+> **Local Network** access like any other LAN feature.
+
 ### The controller's built-in web page
 
 The app mirrors the controller's own web portal (same `/config`, `/save`,
@@ -233,7 +255,9 @@ it Gatekeeper blocks an unsigned, un-notarized bundle. On first launch, allow
 
   Each release attaches `Antenna-Switch-Controller-macOS.dmg` (the app),
   `AntennaSwitch.radioplugin` (the suite plugin), and
-  `AntennaSwitchController-firmware.bin` (flash via OTA `espota.py` or USB).
+  `AntennaSwitchController-firmware.bin` (flash from the app's **Update Firmware…**,
+  OTA `espota.py`, or USB). The app's update sheet downloads it straight from the
+  latest release.
 
 ### Host inside the Amateur Radio Suite
 

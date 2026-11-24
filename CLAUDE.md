@@ -151,7 +151,8 @@ at power-up, and SHOULD prefer GPIO14/12/13/4/5 for the most-used bands.
 ### 2.4 OTA updates
 
 - **R4.1** After the initial USB flash, the firmware SHALL support **OTA updates
-  via ArduinoOTA over WiFi / mDNS** (STA mode only).
+  via ArduinoOTA over WiFi / mDNS** (STA mode only). Clients: `espota.py` /
+  `arduino-cli`, and the macOS app's **Update Firmware…** (same protocol, Part 2).
 - **R4.2** The OTA password SHALL be configurable (default empty), settable in
   the web UI; changes take effect after reboot without USB.
 - **R4.3** During an OTA update the firmware SHALL force the **safe state (all
@@ -292,13 +293,18 @@ Controllers. Mirrors the conventions of `VU3ESV/BandPassFilterControllerApp`.
   Codable), `DeviceIdentity` (`/discover`), `DeviceStatus` (`/status`),
   `DeviceConfig` (`/config` read + `formBody()` for `/save`).
 - `Networking/` — `AntennaSwitchClient` (async HTTP), `DiscoveryService`
-  (Bonjour `_antsw._tcp`, `NetServiceBrowser`).
+  (Bonjour `_antsw._tcp`, `NetServiceBrowser`), and OTA: `EspOTA` (pure espota
+  wire format + `FirmwareImage` validation/version + `FirmwareVersion`),
+  `EspOTAUploader` (Network.framework UDP invitation + TCP connect-back listener),
+  `FirmwareReleaseClient` (latest GitHub release → `AntennaSwitchController-firmware.bin`).
 - `ViewModels/` — `ControllersStore` (`@MainActor`, owns the persisted controller
-  list + discovery, the sidebar's source of truth) and `ControllerViewModel`
-  (per-controller: 2 s `/status` poll, load/save `/config`, relay override, reboot).
+  list + discovery, the sidebar's source of truth), `ControllerViewModel`
+  (per-controller: 2 s `/status` poll, load/save `/config`, relay override, reboot)
+  and `FirmwareUpdateModel` (one OTA update: image source → upload → reboot check).
 - `Views/` — `ContentView` (NavigationSplitView + sidebar + add-by-IP sheet),
   `ControllerDetailView` (Dashboard/Controls/Settings tabs, fresh VM per
-  selection via `.id`), `DashboardView`, `ControlsView`, `SettingsView`.
+  selection via `.id`; toolbar: web portal, **Update Firmware…**, reboot),
+  `DashboardView`, `ControlsView`, `SettingsView`, `FirmwareUpdateView` (sheet).
 - `Snapshot.swift` + `ASC_DEMO` window mode — offscreen/demo rendering for the
   documentation screenshots only; not used at runtime.
 
@@ -311,6 +317,26 @@ Controllers. Mirrors the conventions of `VU3ESV/BandPassFilterControllerApp`.
   back and are only sent when the operator types a new value (blank = keep).
 - `NSLocalNetworkUsageDescription` + `NSBonjourServices` in `Resources/Info.plist`
   are required for LAN/Bonjour access on macOS.
+- **OTA from the app speaks ArduinoOTA (espota), not an HTTP upload**, so it works
+  with the firmware already on the boards (R4.1), with no firmware change. The
+  protocol is taken from the ESP8266 core 3.1.2 sources (`ArduinoOTA.cpp`,
+  `tools/espota.py`): a UDP invitation to :8266, an optional MD5 challenge
+  (`md5(md5(pw):nonce:cnonce)`), then the **board connects back** over TCP and acks
+  each 1460-byte chunk. Consequences:
+  - The sandboxed `.appex` needs `network.server` (plus `files.user-selected.read-only`
+    for a local `.bin`), and the macOS firewall must allow the app's inbound
+    connection.
+  - Firmware `onStart` forces relays safe and drops TCI, but there's **no
+    `onError`**: after a failed or aborted update the relays stay off until
+    reboot, so the sheet offers **Reboot Controller**.
+  - The app refuses to start an update during TX/tune (R2.9).
+  - The app validates the image before sending it: ESP magic `0xE9`, plus the
+    `/discover` literal `{"device":"AntennaSwitchController","version":"<FW_VERSION>`
+    that WebPortal.h compiles into every image, which is also where the version
+    shown in the sheet comes from.
+  - `EspOTAUploaderTests` runs the uploader against a loopback `FakeOTADevice`.
+    `testLiveUploadToBoard` flashes a real board only when `ANTSW_OTA_HOST` and
+    `ANTSW_OTA_BIN` are set (plus `ANTSW_OTA_PASSWORD` if the board has one).
 
 ## RadioPluginKit 1.2 contract
 `AntennaSwitchPlugin` implements the full 1.2 contract:

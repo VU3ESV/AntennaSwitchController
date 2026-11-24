@@ -9,5 +9,12 @@
 	     Outgoing connections + Bonjour browsing both require the network-client entitlement. -->
 	<key>com.apple.security.network.client</key>
 	<true/>
+	<!-- OTA firmware update: ArduinoOTA makes the controller connect BACK to the host,
+	     so the uploader listens on an ephemeral TCP port (EspOTAUploader). -->
+	<key>com.apple.security.network.server</key>
+	<true/>
+	<!-- OTA firmware update from a local .bin chosen in the open panel. -->
+	<key>com.apple.security.files.user-selected.read-only</key>
+	<true/>
 </dict>
 </plist>

@@ -50,6 +50,7 @@ public struct AntennaSwitchStandaloneApp: App {
         switch pane {
         case "controls":  ControlsView(vm: vm)
         case "dashboard": DashboardView(vm: vm)
+        case "firmware":  FirmwareUpdateView(controller: vm)
         default:          SettingsView(vm: vm)
         }
     }
