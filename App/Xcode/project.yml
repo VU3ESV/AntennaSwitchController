@@ -34,6 +34,11 @@ targets:
       properties:
         CFBundleName: Antenna Switch
         CFBundleDisplayName: Antenna Switch
+        # Follow the app version: the packaging scripts pass VERSION (scripts/version.sh)
+        # as MARKETING_VERSION / CURRENT_PROJECT_VERSION. Without these two keys XcodeGen
+        # writes a literal "1.0" / "1" and the plugin never reports the real version.
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         EXAppExtensionAttributes:
           EXExtensionPointIdentifier: org.vu3esv.radiosuite.plugin
     settings:
@@ -41,7 +46,8 @@ targets:
         # IMPORTANT: this bundle id is the plugin's identity -- it must match
         # `plugin.json`'s `id` so the suite correlates the manifest to the extension.
         PRODUCT_BUNDLE_IDENTIFIER: org.vu3esv.radiosuite.AntennaSwitch
-        MARKETING_VERSION: "1.0.0"
+        MARKETING_VERSION: "0.0.0-dev"         # overridden with VERSION when packaging
+        CURRENT_PROJECT_VERSION: "0.0.0-dev"
         CODE_SIGN_STYLE: Manual
         CODE_SIGN_IDENTITY: "-"      # ad-hoc for local dev; Developer-ID needed to ship
         ENABLE_HARDENED_RUNTIME: YES                                 # required for notarization

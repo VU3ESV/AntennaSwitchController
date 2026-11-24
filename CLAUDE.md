@@ -152,7 +152,7 @@ at power-up, and SHOULD prefer GPIO14/12/13/4/5 for the most-used bands.
 
 - **R4.1** After the initial USB flash, the firmware SHALL support **OTA updates
   via ArduinoOTA over WiFi / mDNS** (STA mode only). Clients: `espota.py` /
-  `arduino-cli`, and the macOS app's **Update Firmware…** (same protocol, Part 2).
+  `arduino-cli`, and the macOS app's **Firmware** tab (same protocol, Part 2).
 - **R4.2** The OTA password SHALL be configurable (default empty), settable in
   the web UI; changes take effect after reboot without USB.
 - **R4.3** During an OTA update the firmware SHALL force the **safe state (all
@@ -287,6 +287,15 @@ Controllers. Mirrors the conventions of `VU3ESV/BandPassFilterControllerApp`.
   library product too) compiles the shared target under universal builds.
 - Depends on `RadioPluginKit` by **Git URL `from: "1.0.0"`** (same as the suite,
   so the whole graph resolves one identical RadioPluginKit — no path/URL clash).
+- **One version for app and plugin.** `App/scripts/version.sh` (release `VERSION`,
+  else the latest git tag, else `0.0.0-dev`) is sourced by `build-app.sh`,
+  `scripts/package-signed.sh` and `scripts/make-radioplugin.sh`. The `.appex`
+  Info.plist takes it via `$(MARKETING_VERSION)` / `$(CURRENT_PROJECT_VERSION)`
+  (project.yml), and `plugin.json` via its `__VERSION__` placeholder. The suite
+  reads a plugin's version from `plugin.json` (plugin list + update check), and
+  pluginkit reads it from the Info.plist. Both scripts fail on a mismatch. Never
+  hardcode a version in `plugin.json` or project.yml. The Swift
+  `AntennaSwitchPlugin.manifest` version is in-process only; the suite doesn't use it.
 
 ## Layout (`App/Sources/AntennaSwitchController/`)
 - `Models/` — `Band` (index order matches firmware), `Controller` (saved device,
@@ -303,8 +312,9 @@ Controllers. Mirrors the conventions of `VU3ESV/BandPassFilterControllerApp`.
   and `FirmwareUpdateModel` (one OTA update: image source → upload → reboot check).
 - `Views/` — `ContentView` (NavigationSplitView + sidebar + add-by-IP sheet),
   `ControllerDetailView` (Dashboard/Controls/Settings tabs, fresh VM per
-  selection via `.id`; toolbar: web portal, **Update Firmware…**, reboot),
-  `DashboardView`, `ControlsView`, `SettingsView`, `FirmwareUpdateView` (sheet).
+  selection via `.id`; owns the `FirmwareUpdateModel`; toolbar: web portal,
+  reboot), `DashboardView`, `ControlsView`, `SettingsView`, `FirmwareUpdateView`
+  (the **Firmware** tab).
 - `Snapshot.swift` + `ASC_DEMO` window mode — offscreen/demo rendering for the
   documentation screenshots only; not used at runtime.
 
@@ -317,6 +327,12 @@ Controllers. Mirrors the conventions of `VU3ESV/BandPassFilterControllerApp`.
   back and are only sent when the operator types a new value (blank = keep).
 - `NSLocalNetworkUsageDescription` + `NSBonjourServices` in `Resources/Info.plist`
   are required for LAN/Bonjour access on macOS.
+- **Suite-hosted UI: no toolbar actions.** The suite embeds the plugin
+  out-of-process (ExtensionKit) inside its own window, which has its own toolbar,
+  and plugin `.toolbar` items are not shown there. Anything the operator must
+  reach in the suite belongs in the view's content (a tab or a section); BPF puts
+  Reboot in Settings for the same reason. That's why OTA is a **Firmware tab**. The
+  existing toolbar items (connection dot, web portal, Reboot) are standalone-only.
 - **OTA from the app speaks ArduinoOTA (espota), not an HTTP upload**, so it works
   with the firmware already on the boards (R4.1), with no firmware change. The
   protocol is taken from the ESP8266 core 3.1.2 sources (`ArduinoOTA.cpp`,
@@ -328,12 +344,12 @@ Controllers. Mirrors the conventions of `VU3ESV/BandPassFilterControllerApp`.
     connection.
   - Firmware `onStart` forces relays safe and drops TCI, but there's **no
     `onError`**: after a failed or aborted update the relays stay off until
-    reboot, so the sheet offers **Reboot Controller**.
+    reboot, so the Firmware tab offers **Reboot Controller**.
   - The app refuses to start an update during TX/tune (R2.9).
   - The app validates the image before sending it: ESP magic `0xE9`, plus the
     `/discover` literal `{"device":"AntennaSwitchController","version":"<FW_VERSION>`
     that WebPortal.h compiles into every image, which is also where the version
-    shown in the sheet comes from.
+    shown in the tab comes from.
   - `EspOTAUploaderTests` runs the uploader against a loopback `FakeOTADevice`.
     `testLiveUploadToBoard` flashes a real board only when `ANTSW_OTA_HOST` and
     `ANTSW_OTA_BIN` are set (plus `ANTSW_OTA_PASSWORD` if the board has one).

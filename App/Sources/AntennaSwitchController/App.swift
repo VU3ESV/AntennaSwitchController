@@ -50,7 +50,7 @@ public struct AntennaSwitchStandaloneApp: App {
         switch pane {
         case "controls":  ControlsView(vm: vm)
         case "dashboard": DashboardView(vm: vm)
-        case "firmware":  FirmwareUpdateView(controller: vm)
+        case "firmware":  FirmwareDemoPane(vm: vm)
         default:          SettingsView(vm: vm)
         }
     }
@@ -61,4 +61,11 @@ public struct AntennaSwitchStandaloneApp: App {
 /// no way to reopen one), so the Dock icon becomes unresponsive.
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
+}
+
+/// `ASC_DEMO=firmware`: the Firmware tab with its own long-lived model.
+private struct FirmwareDemoPane: View {
+    @StateObject private var model: FirmwareUpdateModel
+    init(vm: ControllerViewModel) { _model = StateObject(wrappedValue: FirmwareUpdateModel(controller: vm)) }
+    var body: some View { FirmwareUpdateView(model: model) }
 }

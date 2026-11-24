@@ -2,70 +2,56 @@ import SwiftUI
 import UniformTypeIdentifiers
 import RadioPluginUI
 
-/// Sheet that updates a controller's firmware over the air (ArduinoOTA), from the
-/// latest GitHub release or a local `.bin`.
+/// Firmware tab: updates the controller's firmware over the air (ArduinoOTA), from
+/// the latest GitHub release or a local `.bin`. Lives in the detail pane's TabView
+/// (not a toolbar sheet) so it is reachable when the suite hosts the plugin.
 struct FirmwareUpdateView: View {
-    @StateObject private var model: FirmwareUpdateModel
-    @Environment(\.dismiss) private var dismiss
+    @ObservedObject var model: FirmwareUpdateModel
     @State private var importing = false
 
     private static let binTypes = [UTType(filenameExtension: "bin", conformingTo: .data) ?? .data]
 
-    init(controller: ControllerViewModel) {
-        _model = StateObject(wrappedValue: FirmwareUpdateModel(controller: controller))
-    }
-
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            header
-            Form {
-                Section("Firmware image") {
-                    Picker("Source", selection: $model.source) {
-                        ForEach(FirmwareUpdateModel.Source.allCases) { Text($0.rawValue).tag($0) }
-                    }
-                    .pickerStyle(.segmented)
-                    sourceDetail
-                }
-                Section("OTA password") {
-                    SecureField("Password", text: $model.password, prompt: Text("Leave blank if none is set"))
-                    Text("The one set under Settings → Device. The controller never sends it back, so type it here.")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
+        Form {
+            Section("Controller") {
+                LabeledContent("Name", value: model.controller.displayName)
+                LabeledContent("Running firmware", value: model.deviceVersion ?? "unknown")
+                LabeledContent("Address", value: model.target)
             }
-            .formStyle(.grouped)
+
+            Section("Firmware image") {
+                Picker("Source", selection: $model.source) {
+                    ForEach(FirmwareUpdateModel.Source.allCases) { Text($0.rawValue).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                sourceDetail
+            }
             .disabled(model.isUpdating)
 
-            statusArea
-            buttons
+            Section("OTA password") {
+                SecureField("Password", text: $model.password, prompt: Text("Leave blank if none is set"))
+                Text("The one set under Settings → Device. The controller never sends it back, so type it here.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            .disabled(model.isUpdating)
+
+            Section {
+                statusArea
+                buttons
+            }
         }
-        .padding(20)
-        .frame(width: 540)
+        .formStyle(.grouped)
         .fileImporter(isPresented: $importing, allowedContentTypes: Self.binTypes) { result in
             switch result {
             case .success(let url): model.loadFile(url)
             case .failure(let error): model.fileImportFailed(error)
             }
         }
-        .interactiveDismissDisabled(model.isUpdating)
         .onAppear { model.prepare() }
         .onChange(of: model.source) { _, _ in model.prepare() }
     }
 
     // MARK: - Sections
-
-    private var header: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("Update Firmware").font(.title2.bold())
-            Text(subtitle).font(.callout).foregroundStyle(.secondary)
-        }
-    }
-
-    private var subtitle: String {
-        let name = model.controller.displayName
-        let parts = [name, "firmware \(model.deviceVersion ?? "unknown")"]
-            + (name == model.target ? [] : [model.target])
-        return parts.joined(separator: " · ")
-    }
 
     @ViewBuilder private var sourceDetail: some View {
         switch model.source {
@@ -166,20 +152,11 @@ struct FirmwareUpdateView: View {
             if model.isUpdating {
                 Button("Cancel", role: .cancel) { model.cancel() }
             } else {
-                Button(isFinished ? "Done" : "Close") { dismiss() }
-                    .keyboardShortcut(isFinished ? .defaultAction : .cancelAction)
-                if !isFinished {
-                    Button("Update") { model.startUpdate() }
-                        .keyboardShortcut(.defaultAction)
-                        .disabled(model.blockReason != nil || model.isBusy)
-                }
+                Button("Update Firmware") { model.startUpdate() }
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(model.blockReason != nil || model.isBusy)
             }
         }
-    }
-
-    private var isFinished: Bool {
-        if case .succeeded = model.stage { return true }
-        return false
     }
 
     private static func bytes(_ n: Int) -> String {

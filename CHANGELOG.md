@@ -11,8 +11,24 @@ work. See the [GitHub Releases] for downloads.
 [GitHub Releases]: https://github.com/VU3ESV/AntennaSwitchController/releases
 
 ## [Unreleased]
+### Fixed
+- **Firmware update is now reachable in the Amateur Radio Suite.** v0.1.34 put
+  **Update Firmware…** in the window toolbar, but the suite hosts the plugin
+  inside its own window and doesn't show plugin toolbar items. It is now a
+  **Firmware** tab next to Settings, in both the suite and the standalone app. The
+  update model is owned by the detail pane, so an update in progress survives
+  switching tabs.
+- **The suite plugin's version now follows the app version.** The `.appex`
+  previously always reported **1.0** and `plugin.json` **1.0.0**, so the suite's
+  plugin list and update check never saw the real release. `scripts/version.sh` is
+  now the single source for `build-app.sh`, `package-signed.sh` and
+  `make-radioplugin.sh`, so the app, its embedded `.appex`, and the
+  `.radioplugin`'s `.appex` + `plugin.json` all carry the release version. Each
+  build fails if any of them doesn't match.
+
+## [v0.1.34] — 2026-11-24
 ### Added
-- **OTA firmware update from the app.** A new **Update Firmware…** toolbar button
+- **OTA firmware update from the app** (now the **Firmware** tab — see above). It
   flashes a controller over WiFi using ArduinoOTA, the same protocol and MD5
   challenge/response as `espota.py`, so it works with the firmware already on the
   boards. The image comes from the **latest GitHub release** (downloaded

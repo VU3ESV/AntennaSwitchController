@@ -35,21 +35,37 @@ TMP="${RUNNER_TEMP:-$(mktemp -d)}"
 # SwiftPM's bare-repo cache trips a common global git setting under xcodebuild.
 export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.bareRepository GIT_CONFIG_VALUE_0=all
 
-echo "==> Building standalone app"
-UNIVERSAL="${UNIVERSAL:-1}" VERSION="${VERSION:-0.0.0-dev}" ./build-app.sh
+# One version for the app AND its embedded plugin (see scripts/version.sh).
+source scripts/version.sh
 
-echo "==> Building the extension (.appex)"
+echo "==> Building standalone app -- version $VERSION"
+UNIVERSAL="${UNIVERSAL:-1}" ./build-app.sh
+
+echo "==> Building the extension (.appex) -- version $VERSION"
 ( cd Xcode && xcodegen generate >/dev/null )
 DERIVED="$(mktemp -d)"
 xcodebuild -project "$PROJECT" -scheme "$SCHEME" -configuration Release \
-  -destination 'platform=macOS' -derivedDataPath "$DERIVED" CODE_SIGNING_ALLOWED=NO build >/dev/null
+  -destination 'platform=macOS' -derivedDataPath "$DERIVED" \
+  MARKETING_VERSION="$VERSION" CURRENT_PROJECT_VERSION="$VERSION" \
+  CODE_SIGNING_ALLOWED=NO build >/dev/null
 APPEX="$(find "$DERIVED/Build/Products" -name "$APPEX_NAME" | head -1)"
+[ -n "$APPEX" ] || { echo "ERROR: $APPEX_NAME not found"; exit 1; }
 
 echo "==> Embedding $APPEX_NAME under Contents/Extensions/"
 mkdir -p "$APP/Contents/Extensions"
 rm -rf "$APP/Contents/Extensions/$APPEX_NAME"
 cp -R "$APPEX" "$APP/Contents/Extensions/"
 rm -rf "$DERIVED"
+
+# The plugin must report exactly the app's version (the suite and pluginkit read it).
+plist_version() { /usr/libexec/PlistBuddy -c "Print :$2" "$1/Contents/Info.plist"; }
+for key in CFBundleShortVersionString CFBundleVersion; do
+  app_v="$(plist_version "$APP" "$key")"
+  ext_v="$(plist_version "$APP/Contents/Extensions/$APPEX_NAME" "$key")"
+  [ "$app_v" = "$VERSION" ] && [ "$ext_v" = "$VERSION" ] || {
+    echo "ERROR: $key mismatch -- app '$app_v', embedded plugin '$ext_v', expected '$VERSION'"; exit 1; }
+done
+echo "    app + embedded plugin both report $VERSION"
 
 # --- import the signing cert into a throwaway keychain (CI) -----------------------------
 IDENTITY=""
