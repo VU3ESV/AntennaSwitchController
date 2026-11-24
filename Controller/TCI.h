@@ -486,6 +486,14 @@ class TCI
 
 	WebSocketsClient webSocket;
 	volatile bool _connected;
+#if defined(ESP8266)
+	// Reconnect gate -- see TCI::serverReachable() in TCI.cpp.
+	bool serverReachable();
+	bool probed = false;
+	bool probe_ok = false;
+	uint32_t probe_at = 0;
+	uint32_t probe_ok_at = 0;
+#endif
 	void webSocketEvent(WStype_t type, uint8_t * payload, size_t length);
 	void hexdump(const void *mem, uint32_t len, uint8_t cols);
 	eventHandlerFunction do_conn_disc_event = NULL;	

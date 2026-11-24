@@ -56,8 +56,11 @@ void TCI::connect() {
 		
 	_connected = false;
 	ws_buffer_full = false;
-	write_index = 0;                 
+	write_index = 0;
 	read_index = 0;
+#if defined(ESP8266)
+	probed = probe_ok = false;       // new host/port: probe it on the next process()
+#endif
 
 	webSocket.begin(host, port, "/");
 	// event handler
@@ -141,7 +144,12 @@ void TCI::connect() {
 // up in the ring — band/TX updates lagged, so relay switching felt slow. A
 // small bounded batch keeps the ring drained while still yielding promptly.
 void TCI::process() {
-	webSocket.loop();
+#if defined(ESP8266)
+	// Never let an unreachable TCI server block loop(): pump the WebSocket only while
+	// connected, or once the server has answered a short probe.
+	if (_connected || serverReachable())
+#endif
+		webSocket.loop();
 
 	const int PROCESS_BATCH = 8;
 	for (int n = 0; n < PROCESS_BATCH; n++) {
@@ -159,6 +167,39 @@ void TCI::process() {
 		read_index = (read_index + 1) % WS_LIST_SIZE;
 	}
 }
+
+#if defined(ESP8266)
+// Reconnect gate. On ESP8266, WebSocketsClient reconnects with a *blocking*
+// WiFiClient::connect() at the core's fixed 5 s timeout (the library passes
+// WEBSOCKETS_TCP_TIMEOUT only on ESP32, and creates a fresh client per attempt, so
+// it can't be shortened). If the TCI server is down and its host drops SYNs
+// silently, e.g. a Mac with the firewall in stealth mode, every reconnect froze
+// loop() for 5 s, every 10 s: web UI, relay overrides and mDNS all stalled
+// (measured on hardware: /status at 4.6-5.0 s, relay clicks taking ~10 s in the app).
+//
+// So, while disconnected, first probe the server with a short bounded connect, and
+// only let the WebSocket client make its own attempt once the server has answered
+// (it then connects immediately). A dead server now costs at most PROBE_TIMEOUT_MS
+// once per PROBE_INTERVAL_MS.
+bool TCI::serverReachable() {
+	const uint32_t PROBE_INTERVAL_MS = 5000;   // same cadence as setReconnectInterval
+	const uint32_t PROBE_TIMEOUT_MS  = 500;    // a LAN TCI server answers a SYN in ms
+	const uint32_t PROBE_GRACE_MS    = 15000;  // window for connect + WS handshake
+
+	uint32_t now = millis();
+	if (probe_ok && now - probe_ok_at < PROBE_GRACE_MS) return true;
+	if (probed && now - probe_at < PROBE_INTERVAL_MS) return false;
+
+	probed = true;
+	probe_at = now;
+	WiFiClient probe;
+	probe.setTimeout(PROBE_TIMEOUT_MS);
+	probe_ok = probe.connect(host, port) == 1;
+	probe.stop();
+	if (probe_ok) probe_ok_at = millis();
+	return probe_ok;
+}
+#endif
 
 void TCI::webSocketEvent(WStype_t type, uint8_t * payload, size_t length) {
 

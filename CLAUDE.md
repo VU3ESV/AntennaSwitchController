@@ -81,7 +81,15 @@ at power-up, and SHOULD prefer GPIO14/12/13/4/5 for the most-used bands.
   single TCI link demultiplexes both receivers into `rtx[0]`/`rtx[1]`, so in
   Mode B with two TCI radios on the **same host:port** (SunSDR2) the second
   `TciSource` shares the first's client (`shareWith()`) rather than opening a
-  redundant WebSocket.
+  redundant WebSocket. **Never block `loop()` on a dead server:** on ESP8266,
+  WebSocketsClient reconnects with a blocking `WiFiClient::connect()` at the
+  core's fixed 5 s timeout (it ignores `WEBSOCKETS_TCP_TIMEOUT` and makes a new
+  client per attempt). So while disconnected, `TCI::process()` first runs
+  `serverReachable()`, a 0.5 s bounded probe every 5 s, and only pumps the
+  WebSocket once the server answers. Without it, a TCI host that silently drops
+  connection attempts (macOS stealth firewall) froze the board for 5 s out of
+  every 10. Any new network source must bound its connects the same way;
+  FlexSource uses `setTimeout(500)`.
 - **R2.2** TCI server `host` and `port` SHALL be configurable via the web UI and
   persisted. Default port `50001` (ExpertSDR3); SHALL also work with SunSDR2 PRO
   and other TCI-compliant servers.
