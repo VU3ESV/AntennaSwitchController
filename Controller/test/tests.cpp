@@ -13,10 +13,12 @@
 #include "Config.h"           // real — via shims/ (enums, struct, migration)
 #include "Interlock.h"        // real — the resolvers under test
 #include "SerialCatSource.h"  // real — the CAT frequency parsers under test
+#include "OutputStage.h"      // real — RelaySelector (radio selector mode)
 #include <cstdio>
 
 // Globals the shims declare extern.
 unsigned long  g_fakeMillis = 0;
+uint8_t        g_pinLevel[32] = {0};
 WiFiClass      WiFi;
 EEPROMClass    EEPROM;
 HardwareSerial Serial;
@@ -212,11 +214,146 @@ static void test_cat() {
     CHECK(catParseCiv(f, sizeof(f)) == 0); }
 }
 
+// --- RelaySelector (MODE_SELECTOR: one 6×1 + independent 1×2s) -------------
+// Bitmask of energized relays, read back from the fake GPIO levels.
+static int pinsHigh() {
+  int m = 0;
+  for (int i = 0; i < NUM_RELAYS; i++) if (g_pinLevel[kRelayPin[i]]) m |= 1 << i;
+  return m;
+}
+static int sixByOneHigh(uint8_t toggleMask) { return pinsHigh() & ~toggleMask; }
+
+static void test_selector() {
+  GROUP("RelaySelector (6x1 + 1x2)");
+  const uint8_t tm = kDefaultToggleMask;            // default: R1 + R6 are the 1×2s
+  RelaySelector s;
+  g_fakeMillis = 1000;
+  s.begin(50); s.setRoles(tm);
+  CHECK(pinsHigh() == 0); CHECK(s.port() == -1); CHECK(s.toggleMask() == tm);
+
+  // Connect 6×1 port R3: nothing energizes until the guard has elapsed.
+  CHECK(s.selectPort(2)); s.tick();
+  CHECK(pinsHigh() == 0); CHECK(s.switching());
+  g_fakeMillis += 50; s.tick();
+  CHECK(pinsHigh() == (1 << 2)); CHECK(s.port() == 2); CHECK(!s.switching());
+
+  // Move to R4: R3 drops at once, R4 makes only after the full guard.
+  CHECK(s.selectPort(3)); s.tick();
+  CHECK(pinsHigh() == 0);
+  g_fakeMillis += 49; s.tick(); CHECK(pinsHigh() == 0);
+  g_fakeMillis += 1;  s.tick(); CHECK(pinsHigh() == (1 << 3));
+
+  // Roles are enforced: a 1×2 relay is not a 6×1 port and vice versa.
+  CHECK(!s.selectPort(0)); CHECK(!s.selectPort(5)); CHECK(!s.setToggle(2, true));
+  CHECK(!s.selectPort(8)); CHECK(!s.setToggle(-1, true)); CHECK(!s.setToggle(8, true));
+
+  // 1×2s switch immediately and never disturb the 6×1.
+  CHECK(s.setToggle(0, true)); s.tick();
+  CHECK(pinsHigh() == ((1 << 3) | (1 << 0))); CHECK(s.toggles() == 1);
+  CHECK(s.setToggle(5, true)); s.tick();
+  CHECK(s.energizedMask() == ((1 << 3) | (1 << 0) | (1 << 5)));
+  CHECK(pinsHigh() == s.energizedMask());
+  CHECK(s.setToggle(0, false)); s.tick();
+  CHECK(pinsHigh() == ((1 << 3) | (1 << 5)));
+
+  // ...and 6×1 changes never disturb the 1×2s.
+  s.selectPort(6); s.tick();
+  CHECK(pinsHigh() == (1 << 5));                    // R4 broken, R6's 1×2 still on port 2
+  g_fakeMillis += 50; s.tick();
+  CHECK(pinsHigh() == ((1 << 6) | (1 << 5)));
+
+  // Open the 6×1.
+  s.selectPort(-1); s.tick(); g_fakeMillis += 50; s.tick();
+  CHECK(pinsHigh() == (1 << 5)); CHECK(s.port() == -1);
+
+  // All off: 6×1 open, every 1×2 back on port 1.
+  s.selectPort(1); s.tick(); g_fakeMillis += 50; s.tick();
+  s.allOff(); s.tick(); g_fakeMillis += 50; s.tick();
+  CHECK(pinsHigh() == 0); CHECK(s.toggles() == 0); CHECK(s.port() == -1);
+
+  // A role change drops straight to the safe state.
+  s.selectPort(1); s.setToggle(5, true); s.tick(); g_fakeMillis += 50; s.tick();
+  CHECK(pinsHigh() == ((1 << 1) | (1 << 5)));
+  s.setRoles(0xC0);                                 // now R7 + R8 are the 1×2s
+  CHECK(pinsHigh() == 0); CHECK(s.port() == -1); CHECK(s.toggles() == 0);
+  CHECK(s.selectPort(0));                           // R1 is a 6×1 port now
+  CHECK(!s.selectPort(7)); CHECK(s.setToggle(7, true));
+  s.setRoles(0xC0); s.tick();                       // same roles: no reset
+  CHECK(pinsHigh() == (1 << 7));
+
+  // Re-command mid-guard: the latest port makes; the abandoned one never clicks,
+  // and no two 6×1 relays are ever on together.
+  { RelaySelector t; g_fakeMillis = 5000; t.begin(50); t.setRoles(0);
+    t.selectPort(1); t.tick(); g_fakeMillis += 50; t.tick();      // R2 on
+    t.selectPort(2); t.tick(); CHECK(pinsHigh() == 0);             // break R2
+    g_fakeMillis += 20; t.selectPort(4); t.tick(); CHECK(pinsHigh() == 0);
+    g_fakeMillis += 30; t.tick();
+    CHECK(pinsHigh() == (1 << 4)); CHECK(t.port() == 4);           // R5, never R3
+    t.tick(); CHECK(pinsHigh() == (1 << 4)); }
+
+  // Exhaustive: whatever sequence of commands, the 6×1 has ≤ 1 relay on.
+  { RelaySelector t; g_fakeMillis = 9000; t.begin(30); t.setRoles(tm);
+    bool ok = true;
+    for (int step = 0; step < 400; step++) {
+      int r = (step * 7 + 3) % 9 - 1;              // -1..7, includes 1×2 relays (rejected)
+      t.selectPort(r);
+      if (step % 5 == 0) t.setToggle(step % 2 ? 0 : 5, step % 3 == 0);
+      t.tick();
+      int six = sixByOneHigh(tm);
+      if (six & (six - 1)) ok = false;             // more than one bit set
+      g_fakeMillis += (step % 4) * 11;
+    }
+    CHECK(ok); }
+}
+
+// --- Config v10 (relay roles for the radio selector) -------------------------
+static void test_config_v10() {
+  GROUP("Config v9 -> v10 (relay roles)");
+
+  // Defaults: 1×2 on R1 + R6, the rest 6×1; selector mode survives the clamp.
+  { Config c; configDefaults(c);
+    CHECK(c.magic == CFG_MAGIC);
+    CHECK(toggleMaskOf(c) == kDefaultToggleMask);
+    c.mode = MODE_SELECTOR;     clampConfig(c); CHECK(c.mode == MODE_SELECTOR);
+    c.mode = MODE_SELECTOR + 1; clampConfig(c); CHECK(c.mode == MODE_STANDALONE);
+    c.relay_role[3] = 7;        clampConfig(c); CHECK(c.relay_role[3] == ROLE_SELECT); }
+
+  // Round-trip: selector mode + custom roles persist (board 3: all 1×2).
+  { Config c; configDefaults(c); c.mode = MODE_SELECTOR;
+    for (int i = 0; i < NUM_RELAYS; i++) c.relay_role[i] = ROLE_TOGGLE;
+    configSave(c);
+    Config d; CHECK(configLoad(d));
+    CHECK(d.mode == MODE_SELECTOR); CHECK(toggleMaskOf(d) == 0xFF); }
+
+  // Migrate a v9 image: every field carried over, roles get the defaults,
+  // and the image is rewritten as v10 (migrate once).
+  { ConfigV9 v9; memset(&v9, 0, sizeof(v9));
+    v9.magic = CFG_MAGIC_V9; v9.mode = MODE_DUAL; v9.tci_port = 60001;
+    v9.cat_baud = 38400; v9.civ_addr = 0x98; v9.guard_ms = 75;
+    strncpy(v9.tci_host, "192.168.86.29", sizeof(v9.tci_host) - 1);
+    strncpy(v9.relay_name[2], "HexBeam", RELAY_NAME_LEN - 1);
+    for (int i = 0; i < NUM_BANDS; i++) { v9.band_relay[i] = (int8_t)(i % 8); v9.band_relay2[i] = -1; }
+    v9.relay_bands[2] = 0x1E0; v9.relay_feed[2] = FEED_TRIPLEXED; v9.relay_group[2] = 2;
+    v9.crc = crc32(reinterpret_cast<const uint8_t*>(&v9), offsetof(ConfigV9, crc));
+    EEPROM.put(0, v9);
+    Config c; CHECK(configLoad(c));
+    CHECK(c.magic == CFG_MAGIC); CHECK(c.mode == MODE_DUAL);
+    CHECK(c.tci_port == 60001); CHECK(strcmp(c.tci_host, "192.168.86.29") == 0);
+    CHECK(strcmp(c.relay_name[2], "HexBeam") == 0); CHECK(c.band_relay[9] == 1);
+    CHECK(c.cat_baud == 38400); CHECK(c.civ_addr == 0x98); CHECK(c.guard_ms == 75);
+    CHECK(c.relay_bands[2] == 0x1E0); CHECK(c.relay_feed[2] == FEED_TRIPLEXED);
+    CHECK(c.relay_group[2] == 2);
+    CHECK(toggleMaskOf(c) == kDefaultToggleMask);
+    ConfigV9 raw; EEPROM.get(0, raw); CHECK(raw.magic == CFG_MAGIC); }  // rewritten as v10
+}
+
 int main() {
   test_dual();
   test_master();
   test_config();
   test_cat();
+  test_selector();
+  test_config_v10();
   printf("\n%d passed, %d failed\n", g_pass, g_fail);
   return g_fail ? 1 : 0;
 }

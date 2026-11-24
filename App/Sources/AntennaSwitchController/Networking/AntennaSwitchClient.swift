@@ -24,6 +24,7 @@ enum AntennaSwitchClientError: LocalizedError {
 ///   GET  /config                   -> JSON DeviceConfig (no passwords)
 ///   POST /save        (form body)  -> persist settings
 ///   POST /relay?set=auto|none|0..7 -> manual override
+///   POST /select?port=|toggle=&state=|alloff=1 -> radio selector (MODE_SELECTOR)
 ///   POST /reboot                   -> soft reboot
 struct AntennaSwitchClient {
     /// Base host as the user typed it, e.g. "ANT-SW-Controller-7A.local" or "192.168.1.42".
@@ -97,6 +98,32 @@ struct AntennaSwitchClient {
         var comps = URLComponents(url: try baseURL().appendingPathComponent("relay"),
                                   resolvingAgainstBaseURL: false)
         comps?.queryItems = [URLQueryItem(name: "set", value: set)]
+        guard let url = comps?.url else { throw AntennaSwitchClientError.invalidHost }
+        try await postForm(url: url, body: "")
+    }
+
+    // MARK: Radio selector (MODE_SELECTOR) — POST /select
+
+    /// Connect 6×1 port `relay`, or open the 6×1 when nil.
+    func selectPort(_ relay: Int?) async throws {
+        try await select([URLQueryItem(name: "port", value: relay.map(String.init) ?? "none")])
+    }
+
+    /// Move 1×2 relay `relay` to port 2 (`port2`) or port 1.
+    func setSelectorToggle(_ relay: Int, port2: Bool) async throws {
+        try await select([URLQueryItem(name: "toggle", value: String(relay)),
+                          URLQueryItem(name: "state", value: port2 ? "1" : "0")])
+    }
+
+    /// 6×1 open and every 1×2 on port 1.
+    func selectorAllOff() async throws {
+        try await select([URLQueryItem(name: "alloff", value: "1")])
+    }
+
+    private func select(_ query: [URLQueryItem]) async throws {
+        var comps = URLComponents(url: try baseURL().appendingPathComponent("select"),
+                                  resolvingAgainstBaseURL: false)
+        comps?.queryItems = query
         guard let url = comps?.url else { throw AntennaSwitchClientError.invalidHost }
         try await postForm(url: url, body: "")
     }

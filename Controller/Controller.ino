@@ -30,6 +30,8 @@
 Config     g_cfg;
 Relay8x1   g_out;               // 8×1 break-before-make (standalone/master/slave)
 Relay8x2   g_dual;              // 8×2 per-antenna A/B select (Mode B)
+RelaySelector g_sel;            // radio selector: 6×1 + 1×2s (MODE_SELECTOR)
+uint8_t    g_activeMode = 0xFF; // mode the output stages are armed for (applyOutputs)
 WebPortal  g_web;
 
 // Radio 1 sources; g_radio points at the one selected by cfg.radio_type.
@@ -75,6 +77,7 @@ LinkDebounce g_link1, g_link2;
 // previously-selected source first so /save can switch transports cleanly.
 void applyRadio() {
   g_radio->disconnect();
+  if (g_cfg.mode == MODE_SELECTOR) return;   // manual radio selector: no radio tracked
   g_tci.setRig(g_cfg.radio_rx);        // which TCI receiver (0=RX1, 1=RX2)
   if (radioTypeIsSerial(g_cfg.radio_type)) {
     // Serial CAT on UART0 — no host endpoint; takes over the console.
@@ -117,6 +120,35 @@ void applyRadio2() {
                                                : (RadioSource*)&g_tci2;
   g_radio2->configure(g_cfg.radio2_host, g_cfg.radio2_port, g_cfg.iaru_region);
   if (strlen(g_cfg.radio2_host)) g_radio2->connect();
+}
+
+// Arm the output stages for the configured mode. All three stages drive the same
+// 8 pins, so on a mode change every one restarts from all-off and only the
+// active one is ticked by loop(). In selector mode a change of relay roles also
+// drops to all-off (inside setRoles). Roles are applied ONLY in selector mode:
+// setRoles() drives the pins, which would knock out a live antenna otherwise.
+void applyOutputs() {
+  if (g_cfg.mode != g_activeMode) {
+    g_out.beginSafe();
+    g_dual.beginSafe();
+    g_sel.beginSafe();
+    g_activeMode = g_cfg.mode;
+  }
+  if (g_cfg.mode == MODE_SELECTOR) g_sel.setRoles(toggleMaskOf(g_cfg));
+}
+
+// ---- radio selector callbacks (POST /select; MODE_SELECTOR only) -----------
+bool onSelectPort(int relay)        { return g_cfg.mode == MODE_SELECTOR && g_sel.selectPort(relay); }
+bool onSelectToggle(int r, bool on) { return g_cfg.mode == MODE_SELECTOR && g_sel.setToggle(r, on); }
+bool onSelectAllOff() {
+  if (g_cfg.mode != MODE_SELECTOR) return false;
+  g_sel.allOff();
+  return true;
+}
+// Commanded state, for the web page (it reloads before the guard delay elapses).
+void onSelectState(int& port, uint8_t& toggles) {
+  port = g_sel.desiredPort();
+  toggles = g_sel.desiredToggles();
 }
 
 // Apply interlock config (Mode A master policy / slave peer; Mode B policy).
@@ -190,9 +222,10 @@ int interlockResolve(int primary, int secondary) {
 int  onClaim(int ant)  { return (g_cfg.mode == MODE_MASTER) ? g_master.claim(ant) : 0; }
 void onRelease()       { if (g_cfg.mode == MODE_MASTER) g_master.release(); }
 String interlockJson() {
-  const char* role = g_cfg.mode == MODE_MASTER ? "master"
-                   : g_cfg.mode == MODE_SLAVE  ? "slave"
-                   : g_cfg.mode == MODE_DUAL   ? "dual" : "standalone";
+  const char* role = g_cfg.mode == MODE_MASTER   ? "master"
+                   : g_cfg.mode == MODE_SLAVE    ? "slave"
+                   : g_cfg.mode == MODE_DUAL     ? "dual"
+                   : g_cfg.mode == MODE_SELECTOR ? "selector" : "standalone";
   String j;
   j.reserve(128);                 // avoid per-append heap reallocation
   j += "{\"role\":\"";
@@ -230,14 +263,16 @@ String statusJson() {
   j += "\"tx\":"           + String(g_radio->isTx() ? 1 : 0) + ",";
   j += "\"tune\":"         + String(g_radio->isTune() ? 1 : 0) + ",";
   j += "\"override\":"     + String(g_override) + ",";
-  // In dual mode the energized relay is Radio 2's antenna; expose both.
-  int activeRelay = (g_cfg.mode == MODE_DUAL) ? g_dual.radio2Ant() : g_out.activeRelay();
-  bool sw         = (g_cfg.mode == MODE_DUAL) ? g_dual.switching()  : g_out.switching();
+  // In dual mode the energized relay is Radio 2's antenna; expose both. In
+  // selector mode active_relay / radio1_relay are the 6×1's energized port.
+  bool sel        = (g_cfg.mode == MODE_SELECTOR);
+  int activeRelay = sel ? g_sel.port() : (g_cfg.mode == MODE_DUAL) ? g_dual.radio2Ant() : g_out.activeRelay();
+  bool sw         = sel ? g_sel.switching() : (g_cfg.mode == MODE_DUAL) ? g_dual.switching() : g_out.switching();
   j += "\"active_relay\":" + String(activeRelay) + ",";           // -1 = none (legacy)
   // Explicit per-radio energized relays (-1 = none). In dual mode BOTH are live
   // (one per radio); single modes use only radio1_relay. Prefer these over
   // active_relay, which for back-compat still reports radio 2's antenna in dual.
-  int r1Relay = (g_cfg.mode == MODE_DUAL) ? g_dual.radio1Ant() : g_out.activeRelay();
+  int r1Relay = sel ? g_sel.port() : (g_cfg.mode == MODE_DUAL) ? g_dual.radio1Ant() : g_out.activeRelay();
   int r2Relay = (g_cfg.mode == MODE_DUAL) ? g_dual.radio2Ant() : -1;
   j += "\"radio1_relay\":" + String(r1Relay) + ",";
   j += "\"radio2_relay\":" + String(r2Relay) + ",";
@@ -249,6 +284,14 @@ String statusJson() {
     j += ",\"band\":\""          + String(bandName(g_radio2->band())) + "\"";
     j += ",\"tx\":"              + String((g_radio2->isTx() || g_radio2->isTune()) ? 1 : 0) + "},";
   }
+  if (sel) {
+    // Radio selector: the 6×1's energized port (-1 = open), the 1×2s on port 2
+    // (bit i = relay i), and which relays are 1×2s (the rest form the 6×1).
+    j += "\"relay_mask\":" + String(g_sel.energizedMask()) + ",";
+    j += "\"selector\":{\"port\":" + String(g_sel.port());
+    j += ",\"toggles\":"           + String(g_sel.toggles());
+    j += ",\"toggle_mask\":"       + String(g_sel.toggleMask()) + "},";
+  }
   j += "\"interlock\":"    + interlockJson();
   j += "}";
   return j;
@@ -257,6 +300,8 @@ String statusJson() {
 void onSave() {
   g_out.setGuardMs(g_cfg.guard_ms);
   g_dual.setGuardMs(g_cfg.guard_ms);
+  g_sel.setGuardMs(g_cfg.guard_ms);
+  applyOutputs();                   // mode / selector-role change → all-off first
   applyInterlock();                 // master policy / slave peer / dual policy
   if (!g_apMode) { applyRadio(); applyRadio2(); }   // radio 1 (+ radio 2 if dual)
 }
@@ -295,7 +340,8 @@ void setupOTA() {
 }
 
 void handleSerial() {
-  if (radioTypeIsSerial(g_cfg.radio_type)) return;   // UART0 belongs to the CAT radio
+  // UART0 belongs to a CAT radio — except in selector mode, which tracks no radio.
+  if (radioTypeIsSerial(g_cfg.radio_type) && g_cfg.mode != MODE_SELECTOR) return;
   if (!Serial.available()) return;
   String line = Serial.readStringUntil('\n');
   line.trim();
@@ -327,6 +373,8 @@ void setup() {
   bool valid = configLoad(g_cfg);
   g_out.begin(g_cfg.guard_ms);
   g_dual.begin(g_cfg.guard_ms);    // shares the relay pins; both boot to safe
+  g_sel.begin(g_cfg.guard_ms);     // radio selector: boots all-off too (6×1 open, 1×2s on port 1)
+  applyOutputs();                  // arm the stage for the saved mode (+ selector roles)
   pinMode(STATUS_LED, OUTPUT);
   digitalWrite(STATUS_LED, HIGH);   // LED off (active-LOW)
   Serial.printf("config %s, hostname=%s\n", valid ? "loaded" : "defaulted", g_cfg.hostname);
@@ -354,6 +402,7 @@ void setup() {
 
   // 3. SO2R interlock + web portal.
   applyInterlock();
+  g_web.setSelector(onSelectPort, onSelectToggle, onSelectAllOff, onSelectState);
   g_web.begin(g_cfg, statusJson, onSave, onOverride, onReboot,
               onClaim, onRelease, interlockJson
 #ifdef ANTSW_TEST
@@ -370,7 +419,8 @@ void loop() {
   if (!g_apMode) {
     MDNS.update();
     ArduinoOTA.handle();
-    if (WiFi.status() == WL_CONNECTED) {
+    // Selector mode tracks no radio: don't pump (or probe) a transport at all.
+    if (WiFi.status() == WL_CONNECTED && g_cfg.mode != MODE_SELECTOR) {
       g_radio->process();                // pump transport + refresh state
       rawLink = g_radio->connected();
       if (g_cfg.mode == MODE_DUAL) {     // Mode B also tracks radio 2
@@ -389,7 +439,12 @@ void loop() {
   int  band1 = rigBand(0, g_radio),  band2 = rigBand(1, g_radio2);
   bool link1 = rigLink(0, link),     linkB = rigLink(1, link2);
 
-  if (g_cfg.mode == MODE_DUAL) {
+  if (g_cfg.mode == MODE_SELECTOR) {
+    // Radio selector: manual only — POST /select drives g_sel; nothing here
+    // decides a relay. No TX sensing in this mode (the operator owns it).
+    g_sel.tick();                                   // 6×1 break-before-make + 1×2s
+    digitalWrite(STATUS_LED, WiFi.status() == WL_CONNECTED ? LOW : HIGH);  // LED on = on WiFi
+  } else if (g_cfg.mode == MODE_DUAL) {
     // Mode B: one board, both radios → external 8×2 switch. Resolve the two
     // desired antennas (first-come, per-radio TX-safety) then drive the A/B
     // lines. Manual override forces Radio 1; Radio 2 stays automatic.

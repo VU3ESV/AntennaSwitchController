@@ -8,7 +8,7 @@ import Foundation
 /// SO2R interlock state, nested in `/status` as `"interlock"`.
 /// `{"role":"master","peer_up":1,"master_ant":1,"slave_ant":2}`
 struct InterlockStatus: Codable, Equatable {
-    let role: String         // "standalone" | "master" | "slave" | "dual"
+    let role: String         // "standalone" | "master" | "slave" | "dual" | "selector"
     let peerUp: Int
     let beatsMissed: Int?    // consecutive missed heartbeats (Mode A; nil = older fw)
     let masterAnt: Int       // antenna held by the master radio, -1 = none
@@ -24,7 +24,26 @@ struct InterlockStatus: Codable, Equatable {
 
     var isStandalone: Bool { role == "standalone" }
     var isDual: Bool       { role == "dual" }
+    var isSelector: Bool   { role == "selector" }
+    /// Roles that pair with a peer and so have an interlock to show.
+    var hasPeer: Bool      { role == "master" || role == "slave" || role == "dual" }
     var peerIsUp: Bool     { peerUp != 0 }
+}
+
+/// Radio-selector state (MODE_SELECTOR), nested in `/status` as `"selector"`:
+/// `{"port":2,"toggles":1,"toggle_mask":33}`.
+struct SelectorStatus: Codable, Equatable {
+    let port: Int            // energized 6×1 relay, -1 = open
+    let toggles: Int         // bit i = 1×2 relay i on port 2
+    let toggleMask: Int      // bit i = relay i is a 1×2 (the rest form the 6×1)
+
+    enum CodingKeys: String, CodingKey {
+        case port, toggles
+        case toggleMask = "toggle_mask"
+    }
+
+    /// True when 1×2 relay `r` is on port 2 (energized).
+    func isOnPort2(_ r: Int) -> Bool { (toggles >> r) & 1 == 1 }
 }
 
 /// Radio 2 state in Mode B, nested in `/status` as `"radio2"`.
@@ -58,9 +77,10 @@ struct DeviceStatus: Codable, Equatable {
     let switching: Int
     let interlock: InterlockStatus?   // absent on pre-P2b firmware
     let radio2: Radio2Status?         // present only in Mode B (dual)
+    var selector: SelectorStatus? = nil  // present only in radio-selector mode
 
     enum CodingKeys: String, CodingKey {
-        case ap, wifi, ip, tci, freq, band, tx, tune, switching, interlock, radio2
+        case ap, wifi, ip, tci, freq, band, tx, tune, switching, interlock, radio2, selector
         case overrideMode = "override"
         case activeRelay = "active_relay"
         case radio1Relay = "radio1_relay"
@@ -75,6 +95,7 @@ struct DeviceStatus: Codable, Equatable {
     var isSwitching: Bool  { switching != 0 }
     var isAuto: Bool       { overrideMode == -2 }
     var isDual: Bool       { interlock?.isDual == true }
+    var isSelector: Bool   { selector != nil || interlock?.isSelector == true }
 
     /// Radio 1's energized relay index (-1 = none). Prefers the explicit
     /// `radio1_relay`, falling back for older firmware (interlock in dual, else

@@ -117,6 +117,28 @@ final class ControllerViewModel: ObservableObject {
         }
     }
 
+    // MARK: - Radio selector (MODE_SELECTOR)
+
+    /// Connect 6×1 port `relay` (nil = open the 6×1).
+    func selectPort(_ relay: Int?) async { await perform { try await $0.selectPort(relay) } }
+
+    /// Move 1×2 relay `relay` to port 2 (`port2`) or port 1.
+    func setSelectorToggle(_ relay: Int, port2: Bool) async {
+        await perform { try await $0.setSelectorToggle(relay, port2: port2) }
+    }
+
+    func selectorAllOff() async { await perform { try await $0.selectorAllOff() } }
+
+    /// Run a control command, then refresh so the UI shows the result at once.
+    private func perform(_ command: (AntennaSwitchClient) async throws -> Void) async {
+        do {
+            try await command(client)
+            await refreshOnce()
+        } catch {
+            errorMessage = message(error)
+        }
+    }
+
     func reboot() async { try? await client.reboot() }
 
     func openWeb() {

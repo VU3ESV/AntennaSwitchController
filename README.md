@@ -144,6 +144,44 @@ land on the same antenna.
 > leave both on **RX1** — RX2 is only for a single radio that exposes a second
 > receiver. The app hides the RX picker unless both radios share one Host/Port.
 
+### Radio selector: radios → SPE amplifier inputs (manual)
+
+A different job for the same board: share an **SPE Expert**'s two inputs between up
+to six radios, with one radio on each input at a time. Set **Mode → Radio selector**.
+
+- **Each SPE input has a 6×1** (common → SPE INPUT 1 or 2).
+- **Each radio has a 1×2** (common ← radio). Port 1 goes to that radio's port on
+  the INPUT 1 6×1, and port 2 to its port on the INPUT 2 6×1.
+- **To put radio *k* on INPUT 1**, set its 1×2 to **port 1** and the INPUT 1 6×1
+  to **port *k***.
+
+The two 6×1s plus six 1×2s need three 8-relay boards. Each board is controlled on
+its own:
+
+| Board | 6×1 (6 relays) | 1×2 relays |
+|---|---|---|
+| 1 | SPE INPUT 1 ← radios 1–6 | radios 1–2 |
+| 2 | SPE INPUT 2 ← radios 1–6 | radios 3–4 |
+| 3 | — | radios 5–6 (6 spare) |
+
+Under **Settings → Antennas**, give each relay a **Role**: *6×1 port* or *1×2 switch*.
+Name each relay after its radio. On board 3, set the relays you use to *1×2 switch*.
+
+- **The 6×1 connects at most one port**, break-before-make, so two radios are never
+  bridged onto an input.
+- **The 1×2s switch independently:** off = port 1, on = port 2.
+- **Default roles put the 1×2s on R1 and R6.** R1, R5 and R6 sit on the GPIOs that
+  pulse at power-up. With only one of them in the 6×1, a boot glitch can't put two
+  radios on the amplifier.
+- **After power-up, a reboot or a firmware update, everything is off:** both 6×1s
+  open, every 1×2 on port 1. Re-select what you want.
+- **Control is manual only** (app **Controls** tab or the web page). This mode tracks
+  no radio and has **no TX sensing**, so don't switch while a radio is transmitting.
+
+![Radio selector controls](App/docs/images/app-selector-controls.png)
+
+![Radio selector dashboard](App/docs/images/app-selector-dashboard.png)
+
 ---
 
 ## The App (macOS)

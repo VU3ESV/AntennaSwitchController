@@ -19,7 +19,8 @@
 #define CFG_MAGIC_V6 0x414E5436UL  // "ANT6" — v6: adds per-relay names
 #define CFG_MAGIC_V7 0x414E5437UL  // "ANT7" — v7: adds per-band secondary (fallback) relay
 #define CFG_MAGIC_V8 0x414E5438UL  // "ANT8" — v8: adds per-relay antenna metadata
-#define CFG_MAGIC    0x414E5439UL  // "ANT9" — v9: adds serial-CAT (baud + CI-V addr)
+#define CFG_MAGIC_V9 0x414E5439UL  // "ANT9" — v9: adds serial-CAT (baud + CI-V addr)
+#define CFG_MAGIC    0x414E5441UL  // "ANTA" — v10: adds per-relay role (radio selector mode)
 #define EEPROM_SIZE  1024          // grew past 512 with relay names; ESP8266
                                    // reserves a 4 KB flash sector regardless
 
@@ -53,7 +54,25 @@ inline bool radioTypeIsSerial(uint8_t t) { return t >= RADIO_CAT_KENWOOD && t <=
 //   SLAVE      — Mode A Radio-2 board; claims antennas from the master.
 //   DUAL       — Mode B single board: tracks BOTH radios, drives an external
 //                8×2 switch (per-antenna A/B) with in-firmware interlock.
-enum CtrlMode : uint8_t { MODE_STANDALONE = 0, MODE_MASTER = 1, MODE_SLAVE = 2, MODE_DUAL = 3 };
+//   SELECTOR   — radio → SPE-input switch, manual only (no radio tracking). The
+//                relays split by relay_role into one 6×1 (amplifier input, at
+//                most one on) and independent 1×2 radio switches. See
+//                RelaySelector (OutputStage.h) and CLAUDE.md §2.5.
+enum CtrlMode : uint8_t { MODE_STANDALONE = 0, MODE_MASTER = 1, MODE_SLAVE = 2, MODE_DUAL = 3,
+                          MODE_SELECTOR = 4 };
+
+// Per-relay role in MODE_SELECTOR (ignored in every other mode).
+//   SELECT — one port of the 6×1 (N×1) amplifier-input switch: at most one
+//            SELECT relay is energized, break-before-make.
+//   TOGGLE — a 1×2 radio switch (one SPDT relay): de-energized = port 1,
+//            energized = port 2. Independent of the 6×1 and of each other.
+enum RelayRole : uint8_t { ROLE_SELECT = 0, ROLE_TOGGLE = 1 };
+
+// Default roles: 1×2 on R1 + R6, the 6×1 on R2-R5 + R7-R8. GPIO16 (R1), GPIO15
+// (R5) and GPIO0 (R6) pulse at power-up (R1); with only ONE of them in the 6×1,
+// a boot glitch can never connect two radios to the amplifier input at once,
+// and a glitching 1×2 is harmless because the 6×1 is open at boot.
+static const uint8_t kDefaultToggleMask = (1u << 0) | (1u << 5);
 
 // Interlock arbitration when both radios want the same antenna index.
 //   FIRST_COME — current holder keeps it; the newcomer falls back (default).
@@ -105,7 +124,42 @@ struct Config {
                                  // of one triplexed physical antenna
   uint32_t cat_baud;             // radio 1 serial-CAT baud (RADIO_CAT_*); else unused
   uint8_t  civ_addr;             // radio 1 Icom CI-V address (RADIO_CAT_ICOM)
+  uint8_t  relay_role[NUM_RELAYS]; // MODE_SELECTOR: RelayRole per relay (6×1 / 1×2)
   uint32_t crc;                  // CRC32 over all preceding bytes
+};
+
+// Frozen v9 layout — migrate v9 saved configs (serial CAT, no relay roles).
+// DO NOT edit: must match exactly what shipped at the v9 bump.
+struct ConfigV9 {
+  uint32_t magic;
+  char     wifi_ssid[33];
+  char     wifi_pass[65];
+  char     tci_host[64];
+  uint16_t tci_port;
+  uint8_t  iaru_region;
+  uint8_t  radio_type;
+  char     hostname[33];
+  char     ota_pass[33];
+  uint16_t guard_ms;
+  int8_t   band_relay[NUM_BANDS];
+  uint8_t  mode;
+  char     peer_host[64];
+  uint8_t  interlock_policy;
+  uint8_t  on_peer_loss;
+  uint8_t  radio2_type;
+  char     radio2_host[64];
+  uint16_t radio2_port;
+  uint8_t  switch_type;
+  uint8_t  radio_rx;
+  uint8_t  radio2_rx;
+  char     relay_name[NUM_RELAYS][RELAY_NAME_LEN];
+  int8_t   band_relay2[NUM_BANDS];
+  uint16_t relay_bands[NUM_RELAYS];
+  uint8_t  relay_feed[NUM_RELAYS];
+  uint8_t  relay_group[NUM_RELAYS];
+  uint32_t cat_baud;
+  uint8_t  civ_addr;
+  uint32_t crc;
 };
 
 // Frozen v8 layout — migrate v8 saved configs (antenna metadata, no serial CAT).
@@ -347,6 +401,8 @@ inline void configDefaults(Config& c) {
   c.civ_addr         = 0x94;      // Icom default (IC-7300)
   defaultHostname(c.hostname, sizeof(c.hostname));
   for (int i = 0; i < NUM_BANDS; i++) { c.band_relay[i] = -1; c.band_relay2[i] = -1; }  // none
+  for (int i = 0; i < NUM_RELAYS; i++)
+    c.relay_role[i] = ((kDefaultToggleMask >> i) & 1) ? ROLE_TOGGLE : ROLE_SELECT;
   c.crc = configCrc(c);
 }
 
@@ -356,7 +412,7 @@ inline void clampConfig(Config& c) {
     if (c.band_relay2[i] < -1 || c.band_relay2[i] > 7) c.band_relay2[i] = -1;
   }
   if (c.radio_type > RADIO_CAT_YAESU)  c.radio_type       = RADIO_TCI;
-  if (c.mode > MODE_DUAL)              c.mode             = MODE_STANDALONE;
+  if (c.mode > MODE_SELECTOR)          c.mode             = MODE_STANDALONE;
   if (c.interlock_policy > ILK_PRIORITY) c.interlock_policy = ILK_FIRST_COME;
   if (c.on_peer_loss > PEER_LOSS_HOLD) c.on_peer_loss     = PEER_LOSS_SAFE;
   if (c.radio2_type > RADIO_FLEX)      c.radio2_type      = RADIO_TCI;  // radio 2 never serial
@@ -370,7 +426,15 @@ inline void clampConfig(Config& c) {
     c.relay_bands[i] &= bandMask;                       // only valid band bits
     if (c.relay_feed[i] > FEED_TRIPLEXED) c.relay_feed[i] = FEED_SINGLE;
     if (c.relay_group[i] > NUM_RELAYS)    c.relay_group[i] = 0;   // 0..8
+    if (c.relay_role[i] > ROLE_TOGGLE)    c.relay_role[i]  = ROLE_SELECT;
   }
+}
+
+// Bitmask of the relays acting as 1×2 switches in MODE_SELECTOR (bit i = relay i).
+inline uint8_t toggleMaskOf(const Config& c) {
+  uint8_t m = 0;
+  for (int i = 0; i < NUM_RELAYS; i++) if (c.relay_role[i] == ROLE_TOGGLE) m |= (uint8_t)(1u << i);
+  return m;
 }
 
 // Migrate a v1 image (no radio_type, no mode) into v3. configDefaults() supplies
@@ -625,6 +689,49 @@ inline bool configMigrateV8(Config& c) {
   return true;
 }
 
+// Migrate a v9 image (serial CAT, no relay roles) into v10. configDefaults()
+// supplies the default relay roles; every v9 field is carried over unchanged.
+inline bool configMigrateV9(Config& c) {
+  ConfigV9 v9;
+  EEPROM.begin(EEPROM_SIZE);
+  EEPROM.get(0, v9);
+  EEPROM.end();
+  if (v9.magic != CFG_MAGIC_V9) return false;
+  if (crc32(reinterpret_cast<const uint8_t*>(&v9), offsetof(ConfigV9, crc)) != v9.crc) return false;
+
+  configDefaults(c);                                // sets the default relay_role[]
+  memcpy(c.wifi_ssid, v9.wifi_ssid, sizeof(c.wifi_ssid));
+  memcpy(c.wifi_pass, v9.wifi_pass, sizeof(c.wifi_pass));
+  memcpy(c.tci_host,  v9.tci_host,  sizeof(c.tci_host));
+  c.tci_port    = v9.tci_port;
+  c.iaru_region = v9.iaru_region;
+  c.radio_type  = v9.radio_type;
+  memcpy(c.hostname, v9.hostname, sizeof(c.hostname));
+  memcpy(c.ota_pass, v9.ota_pass, sizeof(c.ota_pass));
+  c.guard_ms = v9.guard_ms;
+  memcpy(c.band_relay, v9.band_relay, sizeof(c.band_relay));
+  c.mode             = v9.mode;
+  memcpy(c.peer_host, v9.peer_host, sizeof(c.peer_host));
+  c.interlock_policy = v9.interlock_policy;
+  c.on_peer_loss     = v9.on_peer_loss;
+  c.radio2_type      = v9.radio2_type;
+  memcpy(c.radio2_host, v9.radio2_host, sizeof(c.radio2_host));
+  c.radio2_port      = v9.radio2_port;
+  c.switch_type      = v9.switch_type;
+  c.radio_rx         = v9.radio_rx;
+  c.radio2_rx        = v9.radio2_rx;
+  memcpy(c.relay_name, v9.relay_name, sizeof(c.relay_name));
+  memcpy(c.band_relay2, v9.band_relay2, sizeof(c.band_relay2));
+  memcpy(c.relay_bands, v9.relay_bands, sizeof(c.relay_bands));
+  memcpy(c.relay_feed,  v9.relay_feed,  sizeof(c.relay_feed));
+  memcpy(c.relay_group, v9.relay_group, sizeof(c.relay_group));
+  c.cat_baud         = v9.cat_baud;
+  c.civ_addr         = v9.civ_addr;
+  return true;
+}
+
+static_assert(sizeof(Config) <= EEPROM_SIZE, "Config no longer fits the EEPROM area");
+
 // Returns true if a valid config was loaded (incl. a migrated v1..v8); false
 // if defaults were applied (blank/corrupt EEPROM → safe defaults, caller should
 // enter setup/AP mode).
@@ -636,11 +743,12 @@ inline bool configLoad(Config& c) {
     clampConfig(c);
     return true;
   }
-  if (configMigrateV8(c) || configMigrateV7(c) || configMigrateV6(c) ||
+  if (configMigrateV9(c) ||
+      configMigrateV8(c) || configMigrateV7(c) || configMigrateV6(c) ||
       configMigrateV5(c) || configMigrateV4(c) || configMigrateV3(c) ||
       configMigrateV2(c) || configMigrateV1(c)) {
     clampConfig(c);
-    configSave(c);                                 // persist as v9 (migrate once)
+    configSave(c);                                 // persist as v10 (migrate once)
     return true;
   }
   configDefaults(c);
