@@ -13,16 +13,9 @@ BINARY="AntennaSwitchControllerApp"   # executable product name (see Package.swi
 DIST="dist"
 BUNDLE="$DIST/$APP_NAME.app"
 
-# Version stamped into Info.plist. The release pipeline passes the tag it is
-# about to publish (VERSION=0.1.3); a local build falls back to `git describe`
-# so the About box still shows something meaningful.
-if [ -z "${VERSION:-}" ]; then
-  # `|| true` keeps a tagless checkout (e.g. CI's shallow clone) from tripping
-  # `set -e`/`pipefail` when git describe exits non-zero.
-  VERSION="$(git describe --tags --abbrev=0 2>/dev/null || true)"
-  VERSION="${VERSION#v}"
-  VERSION="${VERSION:-0.0.0-dev}"
-fi
+# Version stamped into Info.plist: the release tag in CI, else the latest git tag.
+# Shared with the plugin scripts so the .appex / plugin.json always match the app.
+source scripts/version.sh
 
 # Universal builds (both Apple Silicon and Intel) for distributable releases.
 # NB: empty-array expansion must be `${a[@]+"${a[@]}"}` to stay safe under

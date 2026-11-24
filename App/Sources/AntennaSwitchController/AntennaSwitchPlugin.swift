@@ -15,6 +15,9 @@ public final class AntennaSwitchPlugin: RadioPlugin, PluginHostBridge {
     public static let manifest: RadioPluginManifest? = RadioPluginManifest(
         id: "antsw",
         name: "Antenna Switch",
+        // In-process manifest only (code linked into a host has no bundle of its own
+        // to read a version from). The suite loads the out-of-process .appex, whose
+        // Info.plist + plugin.json carry the release version (scripts/version.sh).
         version: "1.0",
         isolation: .inProcess,                              // first-party, linked into the host
         capabilities: [.networkClient, .bonjour, .notifications],
