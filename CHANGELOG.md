@@ -12,6 +12,18 @@ work. See the [GitHub Releases] for downloads.
 
 ## [Unreleased]
 ### Fixed
+- **Controller froze for 5 s at a time when its TCI server was unreachable.** On
+  ESP8266 the WebSocket library reconnects with a blocking connect at a fixed 5 s
+  timeout, retried every 5 s. When the TCI server was down and its host dropped
+  connection attempts silently (e.g. a Mac with the firewall in stealth mode),
+  `loop()` froze for 5 s out of every 10. The web UI, app polling, relay
+  overrides and mDNS all stalled; relay clicks in the app took ~10 s. Now, while
+  disconnected, the firmware probes the server with a 0.5 s bounded connect and
+  only lets the WebSocket client reconnect once the server answers. FlexRadio's
+  connect is bounded to 0.5 s the same way.
+
+## [v0.1.35] — 2026-11-24
+### Fixed
 - **Firmware update is now reachable in the Amateur Radio Suite.** v0.1.34 put
   **Update Firmware…** in the window toolbar, but the suite hosts the plugin
   inside its own window and doesn't show plugin toolbar items. It is now a

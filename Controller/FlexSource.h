@@ -57,7 +57,11 @@ class FlexSource : public RadioSource {
       if (now - lastTry_ < kRetryMs) return;     // backoff between attempts
       lastTry_ = now;
       if (strlen(host_) == 0) return;
-      client_.connect(host_, port_);             // brief blocking connect
+      // Bound the blocking connect: the ESP8266 default (5 s) froze loop() -- web UI,
+      // relay overrides -- whenever the radio was off and its host dropped SYNs.
+      // (Reads are byte-wise via available(), so this timeout only shortens waits.)
+      client_.setTimeout(kConnectTimeoutMs);
+      client_.connect(host_, port_);
       return;
     }
 
@@ -77,6 +81,7 @@ class FlexSource : public RadioSource {
  private:
   static const int      kMaxSlices = 4;
   static const uint32_t kRetryMs   = 5000;
+  static const uint32_t kConnectTimeoutMs = 500;   // LAN radio answers a SYN in ms
 
   void handleLine() {
     if (line_.length() < 2 || line_[0] != 'S') return;   // only status lines
