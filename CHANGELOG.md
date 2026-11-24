@@ -11,6 +11,31 @@ work. See the [GitHub Releases] for downloads.
 [GitHub Releases]: https://github.com/VU3ESV/AntennaSwitchController/releases
 
 ## [Unreleased]
+### Added
+- **Radio selector mode (manual): radios → SPE amplifier inputs.** A new mode,
+  *Radio selector*, turns a board into one **6×1** (amplifier input, at most one
+  port on, break-before-make) plus independent **1×2** radio switches (off =
+  port 1, on = port 2). Each relay's role is set under Antennas (config **v10**,
+  `relay_role[]`; the v9→v10 migration keeps all settings). The documented
+  station uses three boards for 6 radios and both SPE inputs.
+  - Control is manual: the app's Controls tab, the web page, or `POST /select`.
+  - The mode tracks no radio and has no TX sensing.
+  - Power-up, reboot, OTA, a mode change and a role change all leave everything
+    off.
+  - Default roles put the 1×2s on R1 + R6, so the GPIO0/15/16 power-up glitch can
+    never put two radios on the amplifier input.
+  - `/status` gains `selector{port, toggles, toggle_mask}`, and `/config` gains
+    `relay_role`.
+
+### Fixed
+- **Opening the controller's web page crashed it.** The page (~30 KB) was built
+  as one String; growing it needs the old and new buffers at once, which
+  exhausted the ESP8266 heap. `GET /` returned nothing, and in radio-selector
+  mode the board rebooted (seen on hardware). The page is now streamed in ~1 KB
+  chunks (chunked transfer), so peak memory stays at a few KB however large it
+  grows. On 2F: 200 OK, 30.7 KB in 0.2–0.4 s, no reboot.
+
+## [v0.1.36] — 2026-11-24
 ### Fixed
 - **Controller froze for 5 s at a time when its TCI server was unreachable.** On
   ESP8266 the WebSocket library reconnects with a blocking connect at a fixed 5 s

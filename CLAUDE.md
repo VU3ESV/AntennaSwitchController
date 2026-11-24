@@ -132,9 +132,10 @@ at power-up, and SHOULD prefer GPIO14/12/13/4/5 for the most-used bands.
   |------------|--------|--------------------------------------------------|
   | `/`        | GET    | Config form: WiFi, TCI host/port, band→relay map, manual override |
   | `/save`    | POST   | Persist settings                                 |
-  | `/status`  | GET    | JSON: current band, active relay, TCI/WiFi/TX/Tune, mode |
-  | `/config`  | GET    | JSON: stored settings (band→relay map + per-band SO2R fallback map, relay names + per-relay antenna metadata (band coverage / feed / group), radio_type (+ cat_baud / civ_addr for serial CAT), radio host/port, receiver index, mode/peer/interlock, radio2_*, switch_type, region, hostname, guard, SSID — **never** passwords) for the macOS app |
+  | `/status`  | GET    | JSON: current band, active relay, TCI/WiFi/TX/Tune, mode; in selector mode also `selector:{port, toggles, toggle_mask}` + `relay_mask` |
+  | `/config`  | GET    | JSON: stored settings (band→relay map + per-band SO2R fallback map, relay names + per-relay antenna metadata (band coverage / feed / group), radio_type (+ cat_baud / civ_addr for serial CAT), radio host/port, receiver index, mode/peer/interlock, radio2_*, switch_type, per-relay `relay_role` (selector mode), region, hostname, guard, SSID — **never** passwords) for the macOS app |
   | `/relay`   | POST   | Manual override: `set=auto\|none\|0..7`          |
+  | `/select`  | POST   | Radio selector (§2.5): `port=<r>\|none`, `toggle=<r>&state=0\|1`, `alloff=1` → 303; 409 outside selector mode, 400 for a relay of the other role |
   | `/discover`| GET    | Device identity + mDNS metadata + firmware version |
   | `/reboot`  | POST   | Soft reboot                                      |
   | `/interlock`| GET   | SO2R Mode A: `{role, peer_up, beats_missed, master_ant, slave_ant}` |
@@ -169,6 +170,42 @@ at power-up, and SHOULD prefer GPIO14/12/13/4/5 for the most-used bands.
 - **R4.4** Flash layout SHALL leave OTA headroom: built with
   `eesz=4M1M` (4 MB flash, 1 MB FS), giving a ~1.5 MB OTA slot; the sketch is
   ~41% of it.
+
+### 2.5 Radio selector mode (manual)
+
+A different use of the same board: route several **radios to the two inputs of an
+SPE Expert amplifier** (`mode = MODE_SELECTOR`, config v10). Topology: one **6×1** per
+SPE input (common → SPE INPUT 1 or 2) and one **1×2** per radio (common ← radio;
+port 1 → that radio's port on the INPUT 1 6×1, port 2 → its port on the INPUT 2
+6×1). Radio *k* reaches INPUT 1 when its 1×2 is on port 1 **and** the INPUT 1 6×1
+is on port *k*. Eight relays don't hold both 6×1s plus six 1×2s, so the station is
+**three boards**, each controlled on its own (per-board control; a station-wide
+view is a possible later step):
+
+| Board | 6×1 (6 relays) | 1×2 relays |
+|---|---|---|
+| 1 | SPE INPUT 1 ← radios 1–6 | radios 1–2 |
+| 2 | SPE INPUT 2 ← radios 1–6 | radios 3–4 |
+| 3 | — | radios 5–6 (6 spare) |
+
+- **R6.1** Each relay SHALL have an operator-set role (`relay_role[]`): **6×1 port**
+  (`ROLE_SELECT`) or **1×2 switch** (`ROLE_TOGGLE`), via web UI and app. Other
+  modes ignore roles.
+- **R6.2** The 6×1 relays SHALL behave as one exclusive switch: at most one
+  energized, break-before-make with the guard delay (R2.8), so two radios are
+  never bridged onto an amplifier input. A re-command during the guard makes the
+  latest port. The 1×2s (one SPDT each: off = port 1, on = port 2) switch
+  immediately and never affect the 6×1, and vice versa (`RelaySelector`).
+- **R6.3** Control is **manual only** (`POST /select`, web UI, app Controls). The
+  mode tracks no radio (no TCI/Flex/CAT connection or polling) and has **no TX
+  sensing**; the UI warns not to switch while a radio transmits.
+- **R6.4** Power-up, reboot, OTA, a mode change and a role change SHALL leave every
+  relay de-energized: both 6×1s open (no radio on the amplifier), every 1×2 on
+  port 1. The last selection is **not** restored.
+- **R6.5** Default roles: 1×2 on **R1 + R6**, the 6×1 on R2–R5 + R7–R8. R1/R5/R6
+  sit on the power-up-glitch GPIOs 16/15/0 (R1); with only one of them in the 6×1
+  a boot glitch can never put two radios on the amplifier input, and a glitching
+  1×2 is harmless because the 6×1 is open.
 
 ## 3. Non-functional requirements
 
@@ -208,14 +245,17 @@ python3 ~/Library/Arduino15/packages/esp8266/hardware/esp8266/*/tools/espota.py 
 ```
 Controller.ino     setup/loop, OTA, failsafe, serial console (wires the parts)
 BandPlan.h         band list (160–6 m incl. 60 m) + frequency→band resolver
-Config.h           EEPROM settings struct + CRC32 load/save, defaults, MAC hostname
+Config.h           EEPROM settings struct (v10) + CRC32 load/save, v1..v9 migrations, defaults, MAC hostname
 RadioSource.h      abstract "band + TX" source (poll-based)
 TciSource.h        RadioSource over the bundled TCI client; setRig() picks RX1/RX2
 FlexSource.h       RadioSource over FlexRadio SmartSDR (TCP 4992); P1, build-verified
 SerialCatSource.h  RadioSource over read-only serial CAT on UART0 (Kenwood/Yaesu "IF;" + Icom CI-V); P1, build-verified, band-only (no TX)
 OutputStage.h      relay map; Relay8x1 (8×1 break-before-make) + Relay8x2 (8×2: relay i=antenna i, one HIGH per radio)
+                   + RelaySelector (radio selector §2.5: one exclusive 6×1 + independent 1×2s)
 Interlock.h        SO2R MasterArbiter + SlaveClient (Mode A, debounced heartbeat) + DualResolver (Mode B)
-WebPortal.h        HTTP routes + HTML config page (+ /config, /discover)
+WebPortal.h        HTTP routes + HTML config page (+ /config, /discover, /select); the page is
+                   STREAMED in ~1 KB chunks (flush()) -- built as one ~30 KB String it ran the
+                   heap out and crashed the board, so never assemble large responses whole
 TCI.h TCI.cpp      bundled IW7DMH TCI v1.0.1, ESP8266-ported (see R2.1); parse
                    hardened: bounds-checked rtxAt() for all rtx[] access + bounded
                    sscanf reads (a garbage rtxId used to crash the ESP on band change)
@@ -322,7 +362,12 @@ Controllers. Mirrors the conventions of `VU3ESV/BandPassFilterControllerApp`.
   `ControllerDetailView` (Dashboard/Controls/Settings tabs, fresh VM per
   selection via `.id`; owns the `FirmwareUpdateModel`; toolbar: web portal,
   reboot), `DashboardView`, `ControlsView`, `SettingsView`, `FirmwareUpdateView`
-  (the **Firmware** tab).
+  (the **Firmware** tab), `SelectorControlsView` (Controls in radio-selector mode:
+  6×1 port grid + 1×2 Port 1/Port 2 pickers; roles from live `/status`
+  `toggle_mask`, not the unsaved form). Radio-selector mode (§2.5): `CtrlMode.selector`,
+  `RelayRole`, `DeviceConfig.relayRoles` (`rr<i>` on save), `DeviceStatus.selector`;
+  Settings shows per-relay roles and hides the Radio / band-map sections.
+  `ASC_DEMO=selector` / `selector-dashboard` render it for the docs.
 - `Snapshot.swift` + `ASC_DEMO` window mode — offscreen/demo rendering for the
   documentation screenshots only; not used at runtime.
 

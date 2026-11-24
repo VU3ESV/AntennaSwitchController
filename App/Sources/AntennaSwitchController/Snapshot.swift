@@ -44,6 +44,34 @@ public enum SnapshotTool {
         return vm
     }
 
+    /// Radio-selector demo — Board 1 of the documented 3-board layout: its 6×1
+    /// feeds SPE INPUT 1 from radios 1–6, and it carries the 1×2s of radios 1–2
+    /// (default roles: 1×2 on R1 + R6). Radio 2 is on INPUT 1 (6×1 → "Radio 2",
+    /// its 1×2 on port 1); Radio 1's 1×2 is on port 2, toward the INPUT 2 board.
+    static func demoSelectorViewModel() -> ControllerViewModel {
+        let vm = ControllerViewModel(host: "ANT-SW-Controller-B1.local", name: "SPE Input 1 board")
+        vm.connected = true
+        vm.status = DeviceStatus(
+            ap: 0, wifi: 1, ip: "192.168.86.71", tci: 0, freq: 0, band: "---", tx: 0, tune: 0,
+            overrideMode: -2, activeRelay: 2, radio1Relay: 2, radio2Relay: -1, switching: 0,
+            interlock: InterlockStatus(role: "selector", peerUp: 0, beatsMissed: 0,
+                                       masterAnt: -1, slaveAnt: -1),
+            radio2: nil,
+            selector: SelectorStatus(port: 2, toggles: 1 << 0, toggleMask: (1 << 0) | (1 << 5)))
+        vm.identity = DeviceIdentity(device: "AntennaSwitchController", version: "0.1.37",
+                                     hostname: "ANT-SW-Controller-B1",
+                                     mdns: "ANT-SW-Controller-B1.local",
+                                     ip: "192.168.86.71", relays: 8)
+        var cfg = DeviceConfig.empty
+        cfg.mode = .selector
+        cfg.relayRoles = RelayRole.defaults
+        cfg.relayNames = ["Radio 1 1×2", "Radio 1", "Radio 2", "Radio 3", "Radio 4",
+                          "Radio 2 1×2", "Radio 5", "Radio 6"]
+        vm.config = cfg
+        vm.configLoaded = true
+        return vm
+    }
+
     public static func render(to dir: String) {
         try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
         let vm = demoViewModel()

@@ -38,13 +38,37 @@ struct DashboardContent: View {
         }
     }
 
+    /// Radio-selector mode: what's on the amplifier input and where each 1×2 is.
+    @ViewBuilder
+    private func selectorDashboard(_ s: DeviceStatus, _ sel: SelectorStatus) -> some View {
+        let toggles = (0..<kRelayCount).filter { (sel.toggleMask >> $0) & 1 == 1 }
+        LazyVGrid(columns: columns, alignment: .leading, spacing: 12) {
+            StatCard(title: "Amplifier Input (6×1)",
+                     value: sel.port >= 0 ? vm.config.relayLabel(sel.port) : "Open",
+                     systemImage: "arrow.right.to.line")
+            ForEach(toggles, id: \.self) { r in
+                StatCard(title: vm.config.relayLabel(r),
+                         value: sel.isOnPort2(r) ? "Port 2" : "Port 1",
+                         systemImage: "arrow.triangle.branch")
+            }
+        }
+        HStack(spacing: 10) {
+            StatusBadge(s.apMode ? "Setup AP" : "WiFi",
+                        kind: s.apMode ? .warning : (s.wifiUp ? .success : .neutral))
+            StatusBadge("Radio selector (manual)", kind: .neutral)
+            if s.isSwitching { StatusBadge("Switching", kind: .neutral) }
+        }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
                 if let err = vm.errorMessage, !vm.connected {
                     Banner(level: .error, title: "Disconnected", message: err)
                 }
 
-                if let s = vm.status {
+                if let s = vm.status, let sel = s.selector {
+                    selectorDashboard(s, sel)     // radio-selector mode (6×1 + 1×2s)
+                } else if let s = vm.status {
                     // In dual mode (Mode B) the top row is Radio 1. The firmware's
                     // active_relay is actually Radio 2's antenna, so use the interlock
                     // fields for unambiguous per-radio relays (master = R1, slave = R2).
@@ -75,7 +99,7 @@ struct DashboardContent: View {
                     // SO2R interlock (hidden for standalone units). For Mode A the
                     // master_ant/slave_ant are the two boards; for Mode B (dual)
                     // they are Radio 1 / Radio 2 on this one board.
-                    if let ilk = s.interlock, !ilk.isStandalone {
+                    if let ilk = s.interlock, ilk.hasPeer {
                         HStack(spacing: 10) {
                             StatusBadge(ilk.isDual ? "Dual (Mode B)" : ilk.role.capitalized, kind: .neutral)
                             // Mode A only: peer health + the two boards' antennas as

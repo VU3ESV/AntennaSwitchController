@@ -47,3 +47,16 @@ class HardwareSerial {
   size_t print(const char*) { return 0; }
 };
 extern HardwareSerial Serial;
+
+// Fake GPIO so OutputStage.h's relay drivers run on the host: digitalWrite
+// records each pin's level in g_pinLevel (defined by the test binary).
+#ifndef OUTPUT
+#define OUTPUT 1
+#endif
+#ifndef LOW
+#define LOW  0
+#define HIGH 1
+#endif
+extern uint8_t g_pinLevel[32];
+inline void pinMode(uint8_t, uint8_t) {}
+inline void digitalWrite(uint8_t pin, uint8_t v) { if (pin < 32) g_pinLevel[pin] = v; }

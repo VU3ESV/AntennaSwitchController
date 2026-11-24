@@ -2,6 +2,7 @@ import SwiftUI
 import RadioPluginUI
 
 /// Manual override controls — force a relay, all-off, or return to auto/TCI.
+/// In radio-selector mode, the 6×1 / 1×2 controls instead (SelectorControlsView).
 struct ControlsView: View {
     @ObservedObject var vm: ControllerViewModel
     @Environment(\.radioTheme) private var theme
@@ -30,6 +31,15 @@ struct ControlsView: View {
     }
 
     var body: some View {
+        // Radio-selector mode has its own 6×1 / 1×2 controls.
+        if vm.status?.isSelector == true {
+            SelectorControlsView(vm: vm)
+        } else {
+            antennaControls
+        }
+    }
+
+    private var antennaControls: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Manual Override").font(.headline).foregroundStyle(theme.textPrimary)
             Text("Force a relay regardless of TCI — **tap an active (red) relay again to switch it off**. ‘Auto’ returns to band tracking; ‘All Off’ disconnects everything. Switching is break-before-make and deferred while transmitting.")

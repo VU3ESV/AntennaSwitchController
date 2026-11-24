@@ -43,6 +43,7 @@ enum CtrlMode: Int, Codable, CaseIterable {
     case master     = 1   // Mode A Radio 1, the LAN interlock arbiter
     case slave      = 2   // Mode A Radio 2, claims antennas from the master
     case dual       = 3   // Mode B: both radios on one board → external 8×2
+    case selector   = 4   // radio → SPE-input switch: 6×1 + 1×2s, manual only
 
     var label: String {
         switch self {
@@ -50,8 +51,24 @@ enum CtrlMode: Int, Codable, CaseIterable {
         case .master:     return "Master (Mode A — Radio 1)"
         case .slave:      return "Slave (Mode A — Radio 2)"
         case .dual:       return "Dual (Mode B — both radios, 8×2)"
+        case .selector:   return "Radio selector (manual — 6×1 + 1×2)"
         }
     }
+
+    /// Modes that pair with another radio/board and so have an interlock policy.
+    var isSO2R: Bool { self == .master || self == .slave || self == .dual }
+}
+
+/// A relay's role in radio-selector mode. Matches the firmware `RelayRole` enum.
+enum RelayRole: Int, Codable, CaseIterable {
+    case sixByOne = 0     // a port of the 6×1 amplifier-input switch (at most one on)
+    case oneByTwo = 1     // a 1×2 radio switch: off = port 1, on = port 2
+
+    var label: String { self == .sixByOne ? "6×1 port" : "1×2 switch" }
+
+    /// Firmware default: 1×2 on R1 + R6 (two of the three boot-glitch GPIOs),
+    /// so a power-up glitch can never put two radios on the amplifier input.
+    static let defaults: [Int] = [1, 0, 0, 0, 0, 1, 0, 0]
 }
 
 /// External antenna switch wiring. Matches the firmware `SwitchType` enum.
@@ -104,6 +121,11 @@ struct DeviceConfig: Codable, Equatable {
     var relayBands: [Int]         // per-relay band-coverage bitmask (bit b = Band b); 0 = undeclared
     var relayFeed: [Int]          // per-relay FeedType: 0 = single feedline, 1 = triplexed leg
     var relayGroup: [Int]         // per-relay triplexer group id; 0 = none
+    var relayRoles: [Int]         // radio selector: RelayRole per relay (0 = 6×1 port, 1 = 1×2)
+
+    /// The relays acting as 6×1 ports / 1×2 switches in radio-selector mode.
+    var sixByOneRelays: [Int] { (0..<kRelayCount).filter { relayRoles[$0] == RelayRole.sixByOne.rawValue } }
+    var oneByTwoRelays: [Int] { (0..<kRelayCount).filter { relayRoles[$0] == RelayRole.oneByTwo.rawValue } }
 
     /// Display name for relay index `r` — the operator's name, or "R<n>" if blank.
     func relayLabel(_ r: Int) -> String {
@@ -136,6 +158,7 @@ struct DeviceConfig: Codable, Equatable {
         case relayBands = "relay_bands"
         case relayFeed = "relay_feed"
         case relayGroup = "relay_group"
+        case relayRoles = "relay_role"
     }
 
     /// Normalize a names array to exactly `kRelayCount` entries (pad/truncate).
@@ -185,6 +208,9 @@ struct DeviceConfig: Codable, Equatable {
         relayBands      = DeviceConfig.normalizedInts(try c.decodeIfPresent([Int].self, forKey: .relayBands), count: kRelayCount)
         relayFeed       = DeviceConfig.normalizedInts(try c.decodeIfPresent([Int].self, forKey: .relayFeed),  count: kRelayCount, pad: 0)
         relayGroup      = DeviceConfig.normalizedInts(try c.decodeIfPresent([Int].self, forKey: .relayGroup), count: kRelayCount, pad: 0)
+        // Radio-selector roles (pre-v10 firmware omits them → the firmware defaults).
+        relayRoles      = try c.decodeIfPresent([Int].self, forKey: .relayRoles)
+                              .map { DeviceConfig.normalizedInts($0, count: kRelayCount, pad: 0) } ?? RelayRole.defaults
     }
 
     init(hostname: String, ssid: String, radioType: RadioType = .tci,
@@ -196,7 +222,8 @@ struct DeviceConfig: Codable, Equatable {
          radio2Type: RadioType = .tci, radio2Host: String = "", radio2Port: Int = 50001,
          switchType: SwitchType = .eightByOne, radioRx: Int = 0, radio2Rx: Int = 0,
          relayNames: [String] = [],
-         relayBands: [Int]? = nil, relayFeed: [Int]? = nil, relayGroup: [Int]? = nil) {
+         relayBands: [Int]? = nil, relayFeed: [Int]? = nil, relayGroup: [Int]? = nil,
+         relayRoles: [Int]? = nil) {
         self.hostname = hostname; self.ssid = ssid; self.radioType = radioType
         self.tciHost = tciHost; self.tciPort = tciPort; self.region = region
         self.catBaud = catBaud; self.civAddr = civAddr
@@ -211,6 +238,7 @@ struct DeviceConfig: Codable, Equatable {
         self.relayBands = DeviceConfig.normalizedInts(relayBands, count: kRelayCount, pad: 0)
         self.relayFeed  = DeviceConfig.normalizedInts(relayFeed,  count: kRelayCount, pad: 0)
         self.relayGroup = DeviceConfig.normalizedInts(relayGroup, count: kRelayCount, pad: 0)
+        self.relayRoles = relayRoles.map { DeviceConfig.normalizedInts($0, count: kRelayCount, pad: 0) } ?? RelayRole.defaults
     }
 
     /// Build the `POST /save` form body matching the firmware's field names
@@ -254,6 +282,7 @@ struct DeviceConfig: Codable, Equatable {
         for (i, mask)  in relayBands.enumerated() { items.append(URLQueryItem(name: "rb\(i)", value: String(mask))) }
         for (i, feed)  in relayFeed.enumerated()  { items.append(URLQueryItem(name: "rf\(i)", value: String(feed))) }
         for (i, group) in relayGroup.enumerated() { items.append(URLQueryItem(name: "rg\(i)", value: String(group))) }
+        for (i, role)  in relayRoles.enumerated() { items.append(URLQueryItem(name: "rr\(i)", value: String(role))) }
         var comps = URLComponents()
         comps.queryItems = items
         // application/x-www-form-urlencoded body.

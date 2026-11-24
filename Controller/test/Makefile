@@ -8,7 +8,7 @@
 CXX      ?= c++
 CXXFLAGS := -std=c++17 -Ishims -I.. -Wall -Wextra -Wno-unused-parameter
 
-tests: tests.cpp ../Config.h ../Interlock.h ../BandPlan.h shims/*.h
+tests: tests.cpp ../Config.h ../Interlock.h ../BandPlan.h ../OutputStage.h shims/*.h
 	$(CXX) $(CXXFLAGS) -o tests tests.cpp
 
 .PHONY: run clean

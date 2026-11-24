@@ -7,6 +7,8 @@
 //   - Relay8x1 — exclusive 1-of-8 with break-before-make (R2.8): today's
 //                standalone behaviour, and what Master/Slave each drive.
 //   - Relay8x2 — per-antenna A/B select for Mode B's external 8×2 switch (P2a).
+//   - RelaySelector — radio selector: one exclusive 6×1 + independent 1×2s
+//                (MODE_SELECTOR, manual).
 //
 // Relays are active-HIGH on this board. GPIO0/15/16 are boot straps that glitch
 // at reset, so beginSafe() drives everything LOW as early as possible (R1).
@@ -182,6 +184,106 @@ class Relay8x2 {
   int      curMask_ = 0, targetMask_ = 0;
   Phase    phase_ = IDLE;
   bool     inhibit_ = false;
+  uint16_t guard_ms_ = 50;
+  uint32_t breakStart_ = 0;
+};
+
+// Radio selector (MODE_SELECTOR): the 8 relays split by role into ONE exclusive
+// "6×1" amplifier-input switch (every relay NOT in toggleMask) and independent
+// "1×2" radio switches (relays in toggleMask; one SPDT each: de-energized =
+// port 1, energized = port 2). Manual only — no radio tracking, no TX sensing.
+//
+//   - 6×1: at most one relay energized, break-before-make with the guard delay
+//     (R2.8), so two radios are never bridged onto the amplifier input.
+//   - 1×2: applied immediately (an SPDT breaks before it makes); never touches
+//     a 6×1 relay, and 6×1 changes never touch a 1×2.
+//   - Boot, a role change, or allOff(): everything de-energized — both 6×1s
+//     open, every 1×2 on port 1 (R2.10).
+class RelaySelector {
+ public:
+  void begin(uint16_t guardMs) { guard_ms_ = guardMs; beginSafe(); }
+
+  void beginSafe() {
+    for (int i = 0; i < NUM_RELAYS; i++) { pinMode(kRelayPin[i], OUTPUT); digitalWrite(kRelayPin[i], LOW); }
+    port_ = target_ = desired_ = -1;
+    toggles_ = desiredToggles_ = 0;
+    phase_ = IDLE;
+  }
+
+  void setGuardMs(uint16_t ms) { guard_ms_ = ms; }
+
+  // Which relays are 1×2 switches (bit i = relay i); the rest form the 6×1.
+  // A change of roles drops everything to the safe state first.
+  void setRoles(uint8_t toggleMask) {
+    if (toggleMask == toggleMask_) return;
+    toggleMask_ = toggleMask;
+    beginSafe();
+  }
+
+  // 6×1: connect relay `relay` (must be a 6×1 member), or -1 = open. False if
+  // `relay` is not a 6×1 relay.
+  bool selectPort(int relay) {
+    if (relay != -1 && !isSelect(relay)) return false;
+    desired_ = relay;
+    return true;
+  }
+
+  // 1×2: move relay `relay` (must be a 1×2) to port 2 (on) or port 1 (off).
+  bool setToggle(int relay, bool on) {
+    if (!isToggle(relay)) return false;
+    if (on) desiredToggles_ |=  (uint8_t)(1u << relay);
+    else    desiredToggles_ &= (uint8_t)~(1u << relay);
+    return true;
+  }
+
+  void allOff() { desired_ = -1; desiredToggles_ = 0; }
+
+  void tick() {
+    // 1×2 switches: independent SPDTs, applied at once.
+    if (desiredToggles_ != toggles_) {
+      for (int i = 0; i < NUM_RELAYS; i++)
+        if (isToggle(i)) digitalWrite(kRelayPin[i], (desiredToggles_ >> i) & 1 ? HIGH : LOW);
+      toggles_ = desiredToggles_;
+    }
+
+    // 6×1: break-before-make. The whole 6×1 is open during the guard, so make the
+    // LATEST commanded port (a re-command mid-guard doesn't click a stale relay).
+    uint32_t now = millis();
+    if (phase_ == BREAKING) {
+      if ((uint32_t)(now - breakStart_) >= guard_ms_) {
+        target_ = desired_;
+        if (target_ >= 0) digitalWrite(kRelayPin[target_], HIGH);
+        port_  = target_;
+        phase_ = IDLE;
+      }
+      return;
+    }
+    if (desired_ != port_) {
+      if (port_ >= 0) digitalWrite(kRelayPin[port_], LOW);   // break
+      port_       = -1;
+      target_     = desired_;
+      breakStart_ = now;
+      phase_      = BREAKING;                                  // make after the guard
+    }
+  }
+
+  int     desiredPort() const   { return desired_; }         // commanded (may still be switching)
+  uint8_t desiredToggles() const{ return desiredToggles_; }
+  int     port() const          { return port_; }            // energized 6×1 relay, -1 = open
+  uint8_t toggles() const       { return toggles_; }         // bit i = 1×2 relay i on port 2
+  uint8_t toggleMask() const    { return toggleMask_; }      // bit i = relay i is a 1×2
+  bool    switching() const     { return phase_ != IDLE; }
+  uint8_t energizedMask() const { return (uint8_t)(toggles_ | (port_ >= 0 ? (1u << port_) : 0)); }
+
+ private:
+  bool isToggle(int r) const { return r >= 0 && r < NUM_RELAYS && ((toggleMask_ >> r) & 1); }
+  bool isSelect(int r) const { return r >= 0 && r < NUM_RELAYS && !((toggleMask_ >> r) & 1); }
+
+  enum Phase { IDLE, BREAKING };
+  int      port_ = -1, target_ = -1, desired_ = -1;
+  uint8_t  toggles_ = 0, desiredToggles_ = 0;
+  uint8_t  toggleMask_ = 0;
+  Phase    phase_ = IDLE;
   uint16_t guard_ms_ = 50;
   uint32_t breakStart_ = 0;
 };

@@ -34,42 +34,44 @@ struct SettingsView: View {
                 SecureField("Password (blank = keep)", text: $vm.config.wifiPassword)
             }
 
-            Section("Radio") {
-                Picker("Type", selection: radioTypeBinding) {
-                    ForEach(RadioType.allCases, id: \.self) { type in
-                        Text(type.label).tag(type)
-                    }
-                }
-                if vm.config.radioType.isSerial {
-                    // Serial CAT on the board's UART — band tracking only.
-                    Picker("CAT baud", selection: $vm.config.catBaud) {
-                        ForEach([4800, 9600, 19200, 38400, 57600, 115200], id: \.self) {
-                            Text("\($0)").tag($0)
+            if vm.config.mode != .selector {   // selector mode tracks no radio
+                Section("Radio") {
+                    Picker("Type", selection: radioTypeBinding) {
+                        ForEach(RadioType.allCases, id: \.self) { type in
+                            Text(type.label).tag(type)
                         }
                     }
-                    if vm.config.radioType == .catIcom {
-                        HStack {
-                            Text("CI-V address")
-                            Spacer()
-                            TextField("0x94", text: civAddrHexBinding)
-                                .frame(width: 80).multilineTextAlignment(.trailing)
+                    if vm.config.radioType.isSerial {
+                        // Serial CAT on the board's UART — band tracking only.
+                        Picker("CAT baud", selection: $vm.config.catBaud) {
+                            ForEach([4800, 9600, 19200, 38400, 57600, 115200], id: \.self) {
+                                Text("\($0)").tag($0)
+                            }
                         }
+                        if vm.config.radioType == .catIcom {
+                            HStack {
+                                Text("CI-V address")
+                                Spacer()
+                                TextField("0x94", text: civAddrHexBinding)
+                                    .frame(width: 80).multilineTextAlignment(.trailing)
+                            }
+                        }
+                        Text("Read-only serial CAT (one per board, UART0). Tracks band only — it can't inhibit switching during TX. See HARDWARE.md.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    } else {
+                        TextField("Host / IP", text: $vm.config.tciHost)
+                        TextField("Port", value: $vm.config.tciPort, format: .number.grouping(.never))
                     }
-                    Text("Read-only serial CAT (one per board, UART0). Tracks band only — it can't inhibit switching during TX. See HARDWARE.md.")
-                        .font(.caption).foregroundStyle(.secondary)
-                } else {
-                    TextField("Host / IP", text: $vm.config.tciHost)
-                    TextField("Port", value: $vm.config.tciPort, format: .number.grouping(.never))
-                }
-                if vm.config.radioType == .tci {
-                    Picker("Receiver", selection: $vm.config.radioRx) {
-                        Text("RX1").tag(0); Text("RX2").tag(1)
+                    if vm.config.radioType == .tci {
+                        Picker("Receiver", selection: $vm.config.radioRx) {
+                            Text("RX1").tag(0); Text("RX2").tag(1)
+                        }
+                        .pickerStyle(.segmented)
+                        Picker("IARU Region", selection: $vm.config.region) {
+                            Text("1").tag(1); Text("2").tag(2); Text("3").tag(3)
+                        }
+                        .pickerStyle(.segmented)
                     }
-                    .pickerStyle(.segmented)
-                    Picker("IARU Region", selection: $vm.config.region) {
-                        Text("1").tag(1); Text("2").tag(2); Text("3").tag(3)
-                    }
-                    .pickerStyle(.segmented)
                 }
             }
 
@@ -83,6 +85,12 @@ struct SettingsView: View {
                                 .foregroundStyle(.secondary)
                             TextField("R\(r + 1) (GPIO\(kRelayGPIO[r]))", text: relayNameBinding(r))
                         }
+                        if vm.config.mode == .selector {
+                            Picker("Role", selection: roleBinding(r)) {
+                                ForEach(RelayRole.allCases, id: \.self) { Text($0.label).tag($0) }
+                            }
+                            .pickerStyle(.segmented).font(.caption)
+                        } else {
                         HStack(spacing: 10) {
                             // Band coverage (multiband model) — multi-select menu.
                             Menu {
@@ -101,10 +109,16 @@ struct SettingsView: View {
                             Stepper("Grp \(vm.config.relayGroup[r])", value: groupBinding(r), in: 0...kRelayCount)
                                 .fixedSize().font(.caption)
                         }
+                        }
                     }
                 }
+                if vm.config.mode == .selector {
+                    Text("Radio selector: **6×1 port** relays form this board's amplifier-input switch (at most one on, break-before-make); each **1×2 switch** routes one radio to port 1 (off) or port 2 (on). Default: 1×2 on R1 + R6, which keeps the GPIO0/15/16 power-up glitch from ever putting two radios on the amplifier input. Name each relay after its radio.")
+                        .font(.caption).foregroundStyle(.secondary)
+                } else {
                 Text("Name each antenna and tick the bands it covers (used to warn about mis-assignments below; leave empty to skip). Triplexed legs of one physical antenna sharing a group may serve both radios at once.")
                     .font(.caption).foregroundStyle(.secondary)
+                }
                 if !AntennaCoverage.conflictingGroups(relayGroup: vm.config.relayGroup,
                                                       relayBands: vm.config.relayBands).isEmpty {
                     Label("A triplexer group has two legs covering the same band.",
@@ -113,36 +127,38 @@ struct SettingsView: View {
                 }
             }
 
-            Section("Band → Relay Map") {
-                ForEach(Band.allCases) { band in
-                    Picker(band.label, selection: relayBinding(for: band.rawValue)) {
-                        Text("None / bypass").tag(-1)
-                        ForEach(0..<kRelayCount, id: \.self) { r in
-                            Text("\(vm.config.relayLabel(r)) (GPIO\(kRelayGPIO[r]))").tag(r)
-                        }
-                    }
-                    // Coverage warning: assigned antenna's declared bands exclude this one.
-                    if mismatchedBands.contains(band.rawValue) {
-                        Label("Assigned antenna's coverage excludes \(band.label).",
-                              systemImage: "exclamationmark.triangle.fill")
-                            .font(.caption).foregroundStyle(.orange)
-                    }
-                    // SO2R fallback antenna — only meaningful when two radios share
-                    // this controller (Master/Slave/Dual); hidden for standalone.
-                    if vm.config.mode != .standalone {
-                        Picker("↳ Fallback", selection: secondaryBinding(for: band.rawValue)) {
-                            Text("None").tag(-1)
+            if vm.config.mode != .selector {   // no band tracking in selector mode
+                Section("Band → Relay Map") {
+                    ForEach(Band.allCases) { band in
+                        Picker(band.label, selection: relayBinding(for: band.rawValue)) {
+                            Text("None / bypass").tag(-1)
                             ForEach(0..<kRelayCount, id: \.self) { r in
-                                Text(vm.config.relayLabel(r)).tag(r)
+                                Text("\(vm.config.relayLabel(r)) (GPIO\(kRelayGPIO[r]))").tag(r)
                             }
                         }
-                        .font(.caption)
+                        // Coverage warning: assigned antenna's declared bands exclude this one.
+                        if mismatchedBands.contains(band.rawValue) {
+                            Label("Assigned antenna's coverage excludes \(band.label).",
+                                  systemImage: "exclamationmark.triangle.fill")
+                                .font(.caption).foregroundStyle(.orange)
+                        }
+                        // SO2R fallback antenna — only meaningful when two radios share
+                        // this controller (Master/Slave/Dual); hidden for standalone.
+                        if vm.config.mode != .standalone {
+                            Picker("↳ Fallback", selection: secondaryBinding(for: band.rawValue)) {
+                                Text("None").tag(-1)
+                                ForEach(0..<kRelayCount, id: \.self) { r in
+                                    Text(vm.config.relayLabel(r)).tag(r)
+                                }
+                            }
+                            .font(.caption)
+                        }
                     }
+                    Text(vm.config.mode == .standalone
+                         ? "Multiple bands may share one relay. Relays on GPIO0/15/16 may twitch at power-up."
+                         : "Fallback is used in SO2R when the primary antenna is already in use by the other radio — e.g. a HexBeam shared across 20–6 m, with a wire dipole as the fallback.")
+                        .font(.caption).foregroundStyle(.secondary)
                 }
-                Text(vm.config.mode == .standalone
-                     ? "Multiple bands may share one relay. Relays on GPIO0/15/16 may twitch at power-up."
-                     : "Fallback is used in SO2R when the primary antenna is already in use by the other radio — e.g. a HexBeam shared across 20–6 m, with a wire dipole as the fallback.")
-                    .font(.caption).foregroundStyle(.secondary)
             }
 
             Section("Device") {
@@ -156,8 +172,8 @@ struct SettingsView: View {
                 }
             }
 
-            Section("SO2R Role (Mode A)") {
-                Picker("Role", selection: $vm.config.mode) {
+            Section("Mode") {
+                Picker("Mode", selection: $vm.config.mode) {
                     ForEach(CtrlMode.allCases, id: \.self) { Text($0.label).tag($0) }
                 }
                 if vm.config.mode == .slave {
@@ -175,7 +191,11 @@ struct SettingsView: View {
                         }
                     }
                 }
-                if vm.config.mode != .standalone {
+                if vm.config.mode == .selector {
+                    Text("Radios → SPE amplifier input, switched manually from the Controls tab. Set each relay's role under Antennas. No radio is tracked and there is no TX sensing.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                if vm.config.mode.isSO2R {
                     Picker("Interlock policy", selection: $vm.config.interlockPolicy) {
                         ForEach(InterlockPolicy.allCases, id: \.self) { Text($0.label).tag($0) }
                     }
@@ -315,6 +335,11 @@ struct SettingsView: View {
                 else  { vm.config.relayBands[r] &= ~(1 << bandIndex) }
             }
         )
+    }
+
+    private func roleBinding(_ r: Int) -> Binding<RelayRole> {
+        Binding(get: { RelayRole(rawValue: vm.config.relayRoles[r]) ?? .sixByOne },
+                set: { vm.config.relayRoles[r] = $0.rawValue })
     }
 
     private func feedBinding(_ r: Int) -> Binding<Int> {

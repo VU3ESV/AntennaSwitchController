@@ -51,6 +51,8 @@ public struct AntennaSwitchStandaloneApp: App {
         case "controls":  ControlsView(vm: vm)
         case "dashboard": DashboardView(vm: vm)
         case "firmware":  FirmwareDemoPane(vm: vm)
+        case "selector":  ControlsView(vm: SnapshotTool.demoSelectorViewModel())
+        case "selector-dashboard": DashboardView(vm: SnapshotTool.demoSelectorViewModel())
         default:          SettingsView(vm: vm)
         }
     }

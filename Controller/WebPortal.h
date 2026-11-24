@@ -5,6 +5,7 @@
 //   POST /save      persist settings
 //   GET  /status    JSON operational state
 //   POST /relay     manual override (set=auto|none|0..7)
+//   POST /select    radio selector (MODE_SELECTOR): port=<r>|none, toggle=<r>&state=0|1, alloff=1
 //   POST /reboot    soft reboot
 //   GET  /discover  device identity + mDNS metadata
 #ifndef WEBPORTAL_H
@@ -28,9 +29,20 @@ typedef void   (*ReleaseFn)();       // SO2R: slave release
 typedef String (*InterlockFn)();     // SO2R: interlock state JSON
 typedef void   (*TestInjectFn)(int radio, int band, int tx);  // test rig (ANTSW_TEST)
 typedef void   (*TestClearFn)();                              // test rig clear
+typedef bool   (*SelectPortFn)(int relay);                    // selector: 6×1 port (-1 = open)
+typedef bool   (*SelectToggleFn)(int relay, bool on);         // selector: 1×2 → port 2 (on) / 1
+typedef bool   (*SelectAllOffFn)();                           // selector: everything off
+typedef void   (*SelectStateFn)(int& port, uint8_t& toggles); // selector: commanded state
 
 class WebPortal {
  public:
+  // Radio-selector handlers (MODE_SELECTOR). Set before begin(); /select answers
+  // 409 while the board is in any other mode.
+  void setSelector(SelectPortFn portFn, SelectToggleFn toggleFn,
+                   SelectAllOffFn allOffFn, SelectStateFn stateFn) {
+    selPortFn_ = portFn; selToggleFn_ = toggleFn; selAllOffFn_ = allOffFn; selStateFn_ = stateFn;
+  }
+
   void begin(Config& cfg, StatusFn statusFn, SaveFn saveFn,
              OverrideFn ovrFn, RebootFn rebootFn,
              ClaimFn claimFn = nullptr, ReleaseFn releaseFn = nullptr,
@@ -52,6 +64,7 @@ class WebPortal {
     server_.on("/status",   HTTP_GET,  [this]{ server_.send(200, "application/json", statusFn_()); });
     server_.on("/config",   HTTP_GET,  [this]{ handleConfig(); });
     server_.on("/relay",    HTTP_POST, [this]{ handleRelay(); });
+    server_.on("/select",   HTTP_POST, [this]{ handleSelect(); });
     server_.on("/reboot",   HTTP_POST, [this]{ server_.send(200, "text/plain", "rebooting"); rebootFn_(); });
     server_.on("/discover", HTTP_GET,  [this]{ handleDiscover(); });
     // SO2R Mode A interlock API (§6.1).
@@ -82,6 +95,10 @@ class WebPortal {
   InterlockFn  interlockFn_  = nullptr;
   TestInjectFn testInjectFn_ = nullptr;
   TestClearFn  testClearFn_  = nullptr;
+  SelectPortFn   selPortFn_   = nullptr;
+  SelectToggleFn selToggleFn_ = nullptr;
+  SelectAllOffFn selAllOffFn_ = nullptr;
+  SelectStateFn  selStateFn_  = nullptr;
 
   static String esc(const char* s) {
     String o;
@@ -119,8 +136,11 @@ class WebPortal {
 
   void handleRoot() {
     Config& c = *cfg_;
+    // Streamed in ~1 KB chunks (chunked transfer), never built whole — see flush().
+    server_.setContentLength(CONTENT_LENGTH_UNKNOWN);
+    server_.send(200, "text/html", "");
     String h;
-    h.reserve(4096);
+    h.reserve(1536);
     h += F("<!doctype html><html><head><meta charset=utf-8>"
            "<meta name=viewport content='width=device-width,initial-scale=1'>"
            "<title>Antenna Switch Controller</title><style>"
@@ -168,6 +188,7 @@ class WebPortal {
     for (int r = 1; r <= 3; r++)
       h += "<option value=" + String(r) + (c.iaru_region == r ? " selected" : "") + ">" + String(r) + "</option>";
     h += F("</select></fieldset>");
+    flush(h);
 
     // --- antennas: name + band coverage + feed/group (multiband model, §11) ---
     h += F("<fieldset><legend>Antennas</legend>"
@@ -196,7 +217,13 @@ class WebPortal {
       h += "</select></div><div><label>Group <span class=muted>(0=none)</span></label>"
            "<input name=rg" + String(r) + " type=number min=0 max=" + String(NUM_RELAYS) +
            " value=" + String(c.relay_group[r]) + "></div>";
+      // Role in radio-selector mode: a 6×1 port or a 1×2 switch (other modes ignore it).
+      h += "<div><label>Role <span class=muted>(radio selector)</span></label><select name=rr" + String(r) + ">";
+      h += "<option value=0" + String(c.relay_role[r] == ROLE_SELECT ? " selected" : "") + ">6&times;1 port</option>";
+      h += "<option value=1" + String(c.relay_role[r] == ROLE_TOGGLE ? " selected" : "") + ">1&times;2 switch</option>";
+      h += F("</select></div>");
       h += F("</div></div>");
+      flush(h);
     }
     h += F("</fieldset>");
 
@@ -223,6 +250,7 @@ class WebPortal {
       h += "<td>";
       if (warn) h += "<span style='color:#c00' title='antenna coverage excludes this band'>&#9888;</span>";
       h += F("</td></tr>");
+      flush(h);
     }
     h += F("</table><p class=muted>Multiple bands may share one relay. "
            "<b>Fallback</b> is used in SO2R (Master/Slave or Dual) when the primary "
@@ -231,13 +259,17 @@ class WebPortal {
            "(set under Antennas) excludes that band. Relays on GPIO0/15/16 may twitch at power-up.</p></fieldset>");
 
     // --- SO2R Mode A (master/slave) ---
-    h += F("<fieldset><legend>SO2R role (Mode A)</legend>");
-    h += F("<label>Role</label><select name=mode>");
+    h += F("<fieldset><legend>Mode (SO2R role / radio selector)</legend>");
+    h += F("<label>Mode</label><select name=mode>");
     h += "<option value=0" + String(c.mode == MODE_STANDALONE ? " selected" : "") + ">Standalone (single radio)</option>";
     h += "<option value=1" + String(c.mode == MODE_MASTER     ? " selected" : "") + ">Master (Mode A — Radio 1, arbiter)</option>";
     h += "<option value=2" + String(c.mode == MODE_SLAVE      ? " selected" : "") + ">Slave (Mode A — Radio 2)</option>";
     h += "<option value=3" + String(c.mode == MODE_DUAL       ? " selected" : "") + ">Dual (Mode B — both radios, 8&times;2)</option>";
-    h += F("</select>");
+    h += "<option value=4" + String(c.mode == MODE_SELECTOR   ? " selected" : "") + ">Radio selector (manual — 6&times;1 + 1&times;2)</option>";
+    h += F("</select><p class=muted><b>Radio selector</b>: radios &rarr; SPE amplifier input. "
+           "Relays set to <i>6&times;1 port</i> (under Antennas) form one amplifier-input switch "
+           "(at most one on, break-before-make); <i>1&times;2 switch</i> relays route a radio to "
+           "port 1 (off) or port 2 (on). Manual only &mdash; no radio is tracked.</p>");
     h += "<label>Master address <span class=muted>(slave only — IP of the master)</span></label>"
          "<input name=peer value=\"" + esc(c.peer_host) + "\">";
     h += F("<label>Interlock policy</label><select name=ilk>");
@@ -248,6 +280,7 @@ class WebPortal {
     h += "<option value=1" + String(c.on_peer_loss == PEER_LOSS_HOLD ? " selected" : "") + ">Hold last</option>";
     h += F("</select><p class=muted>Mode A: two 8&times;1 boards (one radio each) over the LAN. "
            "Mode B: one board drives an external 8&times;2 switch from both radios below.</p></fieldset>");
+    flush(h);
 
     // --- Mode B: radio 2 + external switch type ---
     h += F("<fieldset><legend>Radio 2 (Mode B / Dual)</legend>");
@@ -268,6 +301,7 @@ class WebPortal {
     h += F("</select><p class=muted>Dual drives an external 8&times;2 switch: relay <i>i</i> "
            "de-energized routes antenna <i>i</i> to Radio 1, energized to Radio 2. "
            "One serial-CAT radio max per board, so radio 2 must be TCI/Flex here.</p></fieldset>");
+    flush(h);
 
     h += F("<fieldset><legend>Device</legend>");
     h += "<label>Hostname (mDNS / OTA)</label><input name=hostname value=\"" + esc(c.hostname) + "\">";
@@ -276,23 +310,110 @@ class WebPortal {
     h += F("</fieldset>");
 
     h += F("<button type=submit>Save &amp; apply</button></form>");
+    flush(h);
 
-    // --- manual override + reboot ---
-    h += F("<fieldset><legend>Manual override</legend>"
-           "<p class=muted>Force a relay regardless of TCI. 'Auto' returns to band tracking.</p>"
-           "<div class=row>"
-           "<form method=POST action='/relay?set=auto'><button>Auto (TCI)</button></form>"
-           "<form method=POST action='/relay?set=none'><button>All off</button></form>"
-           "</div><div class=row>");
-    for (int r = 0; r < NUM_RELAYS; r++)
-      h += "<form method=POST action='/relay?set=" + String(r) + "'><button>" +
-           (c.relay_name[r][0] ? esc(c.relay_name[r]) : "R" + String(r + 1)) + "</button></form>";
-    h += F("</div></fieldset>");
+    // --- manual control + reboot ---
+    if (c.mode == MODE_SELECTOR) {
+      handleRootSelector(h);
+    } else {
+      h += F("<fieldset><legend>Manual override</legend>"
+             "<p class=muted>Force a relay regardless of TCI. 'Auto' returns to band tracking.</p>"
+             "<div class=row>"
+             "<form method=POST action='/relay?set=auto'><button>Auto (TCI)</button></form>"
+             "<form method=POST action='/relay?set=none'><button>All off</button></form>"
+             "</div><div class=row>");
+      for (int r = 0; r < NUM_RELAYS; r++)
+        h += "<form method=POST action='/relay?set=" + String(r) + "'><button>" +
+             (c.relay_name[r][0] ? esc(c.relay_name[r]) : "R" + String(r + 1)) + "</button></form>";
+      h += F("</div></fieldset>");
+    }
 
     h += F("<form method=POST action=/reboot onsubmit=\"return confirm('Reboot?')\">"
            "<button>Reboot</button></form>");
     h += F("</body></html>");
-    server_.send(200, "text/html", h);
+    flush(h, true);
+    server_.sendContent("");                         // final chunk: end of response
+  }
+
+  // Send the page buffer as a chunk once it passes ~1 KB, then reuse it. Built as
+  // ONE String the page reached ~20 KB, and growing it (realloc needs old + new
+  // buffers at once) exhausted the ESP8266 heap: the board crashed and rebooted on
+  // every GET / (found on hardware). Streaming keeps the peak at a few KB.
+  void flush(String& h, bool force = false) {
+    if (!force && h.length() < 1024) return;
+    server_.sendContent(h);
+    h = "";                                          // keeps the allocated buffer
+  }
+
+  // Radio-selector manual controls (MODE_SELECTOR): the 6×1 ports, each 1×2's
+  // port 1 / port 2, and All off. Shows the COMMANDED state (the page reloads
+  // right after a POST, possibly before the guard delay has elapsed). ● = current.
+  void handleRootSelector(String& h) {
+    const Config& c = *cfg_;
+    int port = -1; uint8_t toggles = 0;
+    if (selStateFn_) selStateFn_(port, toggles);
+    h += F("<fieldset><legend>Radio selector</legend>"
+           "<p class=muted>Manual only &mdash; there is no TX sensing in this mode, so don't "
+           "switch while a radio is transmitting.</p><b>6&times;1 (amplifier input)</b><div class=row>");
+    bool any6 = false;
+    for (int r = 0; r < NUM_RELAYS; r++) {
+      if (c.relay_role[r] != ROLE_SELECT) continue;
+      any6 = true;
+      h += "<form method=POST action='/select?port=" + String(r) + "'><button>" + relayLabel(c, r) +
+           (port == r ? " &#9679;" : "") + "</button></form>";
+      flush(h);
+    }
+    h += "<form method=POST action='/select?port=none'><button>Open" + String(port < 0 ? " &#9679;" : "") +
+         "</button></form></div>";
+    if (!any6) h += F("<p class=muted>No relay is set to <i>6&times;1 port</i>.</p>");
+    h += F("<b>1&times;2 switches</b>");
+    bool any2 = false;
+    for (int r = 0; r < NUM_RELAYS; r++) {
+      if (c.relay_role[r] != ROLE_TOGGLE) continue;
+      any2 = true;
+      bool p2 = (toggles >> r) & 1;
+      h += "<div class=row><div style='flex:2;align-self:center'>" + relayLabel(c, r) + "</div>";
+      h += "<form method=POST action='/select?toggle=" + String(r) + "&state=0'><button>Port 1" +
+           String(!p2 ? " &#9679;" : "") + "</button></form>";
+      h += "<form method=POST action='/select?toggle=" + String(r) + "&state=1'><button>Port 2" +
+           String(p2 ? " &#9679;" : "") + "</button></form></div>";
+      flush(h);
+    }
+    if (!any2) h += F("<p class=muted>No relay is set to <i>1&times;2 switch</i>.</p>");
+    h += F("<form method=POST action='/select?alloff=1'><button>All off</button></form>"
+           "<p class=muted>All off: 6&times;1 open, every 1&times;2 on port 1 (also the state "
+           "after power-up).</p></fieldset>");
+  }
+
+  // POST /select — radio selector (MODE_SELECTOR) manual control:
+  //   port=<relay>|none          connect that 6×1 port (or open the 6×1)
+  //   toggle=<relay>&state=0|1   move a 1×2 to port 1 (0) or port 2 (1)
+  //   alloff=1                   6×1 open + every 1×2 on port 1
+  // 409 outside selector mode; 400 for a relay with a different role.
+  void handleSelect() {
+    if (cfg_->mode != MODE_SELECTOR || !selPortFn_ || !selToggleFn_ || !selAllOffFn_) {
+      server_.send(409, "text/plain", "not in radio selector mode");
+      return;
+    }
+    bool ok = true;
+    if (server_.hasArg("alloff")) ok = selAllOffFn_();
+    if (ok && server_.hasArg("port")) {
+      String p = server_.arg("port");
+      if (p == "none")                                  ok = selPortFn_(-1);
+      else if (p.length() && isDigit(p.charAt(0)))      ok = selPortFn_((int)p.toInt());
+      else                                              ok = false;
+    }
+    if (ok && server_.hasArg("toggle")) {
+      String t = server_.arg("toggle");
+      ok = t.length() && isDigit(t.charAt(0)) &&
+           selToggleFn_((int)t.toInt(), server_.arg("state").toInt() != 0);
+    }
+    if (!ok) {
+      server_.send(400, "text/plain", "relay is not set to that role (6x1 port / 1x2 switch)");
+      return;
+    }
+    server_.sendHeader("Location", "/");
+    server_.send(303, "text/plain", "ok");
   }
 
   void copyArg(const char* name, char* dst, size_t n, bool keepIfEmpty) {
@@ -312,7 +433,7 @@ class WebPortal {
     copyArg("otapass",  c.ota_pass,  sizeof(c.ota_pass),  true);   // blank = keep
     copyArg("peer",     c.peer_host,   sizeof(c.peer_host),   false);
     copyArg("r2host",   c.radio2_host, sizeof(c.radio2_host), false);
-    if (server_.hasArg("mode"))   c.mode             = (uint8_t)constrain(server_.arg("mode").toInt(), 0, 3);
+    if (server_.hasArg("mode"))   c.mode             = (uint8_t)constrain(server_.arg("mode").toInt(), 0, MODE_SELECTOR);
     if (server_.hasArg("ilk"))    c.interlock_policy = (uint8_t)constrain(server_.arg("ilk").toInt(), 0, 1);
     if (server_.hasArg("ploss"))  c.on_peer_loss     = (uint8_t)constrain(server_.arg("ploss").toInt(), 0, 1);
     if (server_.hasArg("r2type")) c.radio2_type      = (uint8_t)constrain(server_.arg("r2type").toInt(), 0, 1);
@@ -356,6 +477,8 @@ class WebPortal {
       if (server_.hasArg(rf)) c.relay_feed[r]  = (uint8_t)constrain(server_.arg(rf).toInt(), 0, 1);
       String rg = "rg" + String(r);
       if (server_.hasArg(rg)) c.relay_group[r] = (uint8_t)constrain(server_.arg(rg).toInt(), 0, NUM_RELAYS);
+      String rr = "rr" + String(r);                    // radio-selector role (6×1 / 1×2)
+      if (server_.hasArg(rr)) c.relay_role[r]  = (uint8_t)constrain(server_.arg(rr).toInt(), 0, ROLE_TOGGLE);
     }
     configSave(c);
     if (saveFn_) saveFn_();
@@ -449,6 +572,8 @@ class WebPortal {
     for (int r = 0; r < NUM_RELAYS; r++) { if (r) j += ","; j += String(c.relay_feed[r]); }
     j += "],\"relay_group\":[";
     for (int r = 0; r < NUM_RELAYS; r++) { if (r) j += ","; j += String(c.relay_group[r]); }
+    j += "],\"relay_role\":[";                      // radio selector: 0 = 6×1 port, 1 = 1×2
+    for (int r = 0; r < NUM_RELAYS; r++) { if (r) j += ","; j += String(c.relay_role[r]); }
     j += "]}";
     server_.send(200, "application/json", j);
   }
