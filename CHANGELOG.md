@@ -11,7 +11,19 @@ work. See the [GitHub Releases] for downloads.
 [GitHub Releases]: https://github.com/VU3ESV/AntennaSwitchController/releases
 
 ## [Unreleased]
-_Nothing yet._
+### Added
+- **OTA firmware update from the app.** A new **Update Firmware…** toolbar button
+  flashes a controller over WiFi using ArduinoOTA, the same protocol and MD5
+  challenge/response as `espota.py`, so it works with the firmware already on the
+  boards. The image comes from the **latest GitHub release** (downloaded
+  automatically) or a **local `.bin`**. Before uploading, the app checks the image
+  is ESP8266 firmware for *this* product and reads its version from the image.
+  After uploading, it waits for the reboot and confirms the new version. It
+  refuses to start while a radio is transmitting (entering OTA forces every relay
+  off), pauses status polling during the update, and offers **Reboot Controller**
+  if a failed update left the relays off. The suite plugin's sandbox gains
+  `network.server` (the board connects back to the app) and
+  `files.user-selected.read-only` (local `.bin`).
 
 ## [v0.1.25] — 2026-06-03
 ### Added
